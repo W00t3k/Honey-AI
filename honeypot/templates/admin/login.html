@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeypot Admin - Login</title>
+    <title>Sign In</title>
     <style>
         * {
             margin: 0;
@@ -119,15 +119,15 @@
 <body>
     <div class="login-container">
         <div class="logo">
-            <h1>🍯 HONEYPOT</h1>
-            <p>Admin Dashboard</p>
+            <h1>Internal Console</h1>
+            <p>Sign in to continue</p>
         </div>
 
         {% if error %}
         <div class="error">{{ error }}</div>
         {% endif %}
 
-        <form method="POST" action="/admin/login">
+        <form method="POST" action="{{ admin_path }}/login">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autocomplete="username">
@@ -142,8 +142,7 @@
         </form>
 
         <div class="warning">
-            ⚠️ This is a security research honeypot admin interface.
-            All access is logged and monitored.
+            ⚠️ Authorized access only.
         </div>
     </div>
 </body>

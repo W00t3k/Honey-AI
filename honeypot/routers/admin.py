@@ -20,7 +20,10 @@ from passlib.context import CryptContext
 from models.db import Database
 from services.config import get_config
 
-router = APIRouter()
+# Configurable admin path — set ADMIN_PATH env var to hide admin UI from discovery
+ADMIN_PATH = os.getenv("ADMIN_PATH", "/admin")
+
+router = APIRouter(prefix=ADMIN_PATH)
 templates = Jinja2Templates(directory="templates")
 
 # Password hashing
@@ -86,7 +89,7 @@ def require_auth(request: Request):
         if not user:
             raise HTTPException(
                 status_code=303,
-                headers={"Location": "/admin/login"},
+                headers={"Location": f"{ADMIN_PATH}/login"},
             )
         return user
 
@@ -110,22 +113,21 @@ def get_database() -> Database:
     return _db
 
 
-@router.get("/admin/login", response_class=HTMLResponse)
+@router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render login page."""
     return templates.TemplateResponse(
         "admin/login.html",
-        {"request": request, "error": None},
+        {"request": request, "error": None, "admin_path": ADMIN_PATH},
     )
 
 
-@router.post("/admin/login")
+@router.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Handle login form submission."""
-    # Simple credential check (no hash for simplicity in honeypot)
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         access_token = create_access_token(data={"sub": username})
-        response = RedirectResponse(url="/admin", status_code=303)
+        response = RedirectResponse(url=ADMIN_PATH, status_code=303)
         response.set_cookie(
             key="access_token",
             value=access_token,
@@ -137,24 +139,24 @@ async def login(request: Request, username: str = Form(...), password: str = For
 
     return templates.TemplateResponse(
         "admin/login.html",
-        {"request": request, "error": "Invalid credentials"},
+        {"request": request, "error": "Invalid credentials", "admin_path": ADMIN_PATH},
     )
 
 
-@router.get("/admin/logout")
+@router.get("/logout")
 async def logout():
     """Handle logout."""
-    response = RedirectResponse(url="/admin/login", status_code=303)
+    response = RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
     response.delete_cookie(key="access_token")
     return response
 
 
-@router.get("/admin", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     """Render admin dashboard."""
     user = await get_current_user(request)
     if not user:
-        return RedirectResponse(url="/admin/login", status_code=303)
+        return RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
 
     db = get_database()
 
@@ -173,11 +175,12 @@ async def admin_dashboard(request: Request):
             "user": user,
             "stats": stats,
             "recent_requests": [r.to_dict() for r in recent_requests],
+            "admin_path": ADMIN_PATH,
         },
     )
 
 
-@router.get("/admin/api/stats")
+@router.get("/api/stats")
 async def api_stats(request: Request):
     """API endpoint for stats (for real-time updates)."""
     user = await get_current_user(request)
@@ -191,7 +194,7 @@ async def api_stats(request: Request):
     return stats
 
 
-@router.get("/admin/api/requests")
+@router.get("/api/requests")
 async def api_requests(request: Request, limit: int = 100, offset: int = 0):
     """API endpoint for recent requests."""
     user = await get_current_user(request)
@@ -203,7 +206,7 @@ async def api_requests(request: Request, limit: int = 100, offset: int = 0):
     return [r.to_dict() for r in requests]
 
 
-@router.get("/admin/api/map")
+@router.get("/api/map")
 async def api_map_data(request: Request):
     """API endpoint for map data."""
     user = await get_current_user(request)
@@ -214,7 +217,7 @@ async def api_map_data(request: Request):
     return await db.get_map_data()
 
 
-@router.get("/admin/export/json")
+@router.get("/export/json")
 async def export_json(
     request: Request,
     limit: Optional[int] = None,
@@ -238,7 +241,7 @@ async def export_json(
     )
 
 
-@router.get("/admin/export/csv")
+@router.get("/export/csv")
 async def export_csv(
     request: Request,
     limit: Optional[int] = None,
@@ -294,12 +297,12 @@ async def export_csv(
     )
 
 
-@router.get("/admin/settings", response_class=HTMLResponse)
+@router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """Render settings page."""
     user = await get_current_user(request)
     if not user:
-        return RedirectResponse(url="/admin/login", status_code=303)
+        return RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
 
     config = get_config()
 
@@ -314,11 +317,12 @@ async def settings_page(request: Request):
             "request": request,
             "config": config.get_all(),
             "geoip_loaded": geoip_loaded,
+            "admin_path": ADMIN_PATH,
         },
     )
 
 
-@router.get("/admin/api/settings")
+@router.get("/api/settings")
 async def get_settings(request: Request):
     """Get current settings."""
     user = await get_current_user(request)
@@ -329,7 +333,7 @@ async def get_settings(request: Request):
     return config.get_safe()
 
 
-@router.post("/admin/api/settings")
+@router.post("/api/settings")
 async def save_settings(request: Request):
     """Save settings."""
     user = await get_current_user(request)
@@ -356,7 +360,7 @@ async def save_settings(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/admin/api/test-groq")
+@router.post("/api/test-groq")
 async def test_groq(request: Request):
     """Test Groq API key."""
     user = await get_current_user(request)
@@ -396,7 +400,7 @@ async def test_groq(request: Request):
         return {"success": False, "message": f"❌ Connection error: {str(e)}"}
 
 
-@router.post("/admin/api/test-webhook")
+@router.post("/api/test-webhook")
 async def test_webhook(request: Request):
     """Test webhook endpoint."""
     user = await get_current_user(request)
@@ -415,19 +419,19 @@ async def test_webhook(request: Request):
         async with httpx.AsyncClient(timeout=10.0) as client:
             if webhook_type == "slack":
                 payload = {
-                    "text": "🍯 *Honeypot Test Alert*\nThis is a test message from your honeypot.",
-                    "username": "Honeypot",
-                    "icon_emoji": ":honey_pot:"
+                    "text": "*Alert Monitor Test*\nWebhook connectivity confirmed.",
+                    "username": "Alert Monitor",
+                    "icon_emoji": ":bell:"
                 }
             elif webhook_type == "discord":
                 payload = {
-                    "content": "🍯 **Honeypot Test Alert**\nThis is a test message from your honeypot.",
-                    "username": "Honeypot"
+                    "content": "**Alert Monitor Test**\nWebhook connectivity confirmed.",
+                    "username": "Alert Monitor"
                 }
             else:  # generic
                 payload = {
                     "event": "test",
-                    "message": "Honeypot webhook test",
+                    "message": "Webhook connectivity test",
                     "timestamp": datetime.utcnow().isoformat()
                 }
 
@@ -442,7 +446,7 @@ async def test_webhook(request: Request):
         return {"success": False, "message": f"❌ Error: {str(e)}"}
 
 
-@router.post("/admin/api/download-geoip")
+@router.post("/api/download-geoip")
 async def download_geoip(request: Request):
     """Download GeoLite2 database."""
     user = await get_current_user(request)

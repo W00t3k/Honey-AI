@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeypot Admin Dashboard</title>
+    <title>Console</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * {
@@ -442,8 +442,8 @@
 <body>
     <header class="header">
         <div class="logo">
-            <h1>🍯 Honeypot</h1>
-            <span>Security Research Dashboard</span>
+            <h1>Console</h1>
+            <span>API Monitor</span>
             <span class="groq-badge">⚡ Groq AI</span>
         </div>
         <div class="header-actions">
@@ -451,10 +451,10 @@
                 <span class="refresh-dot"></span>
                 <span>Live</span>
             </div>
-            <a href="/admin/settings" class="btn btn-secondary">⚙️ Settings</a>
-            <a href="/admin/export/json" class="btn btn-secondary">Export JSON</a>
-            <a href="/admin/export/csv" class="btn btn-secondary">Export CSV</a>
-            <a href="/admin/logout" class="btn btn-primary">Logout</a>
+            <a href="{{ admin_path }}/settings" class="btn btn-secondary">⚙️ Settings</a>
+            <a href="{{ admin_path }}/export/json" class="btn btn-secondary">Export JSON</a>
+            <a href="{{ admin_path }}/export/csv" class="btn btn-secondary">Export CSV</a>
+            <a href="{{ admin_path }}/logout" class="btn btn-primary">Logout</a>
         </div>
     </header>
 
@@ -654,9 +654,11 @@
             iconAnchor: [6, 6]
         });
 
+        const ADMIN_PATH = '{{ admin_path }}';
+
         async function loadMapData() {
             try {
-                const response = await fetch('/admin/api/map');
+                const response = await fetch(ADMIN_PATH + '/api/map');
                 const data = await response.json();
                 data.forEach(point => {
                     if (point.lat && point.lng) {
@@ -688,7 +690,7 @@
 
         async function refreshData() {
             try {
-                const statsResponse = await fetch('/admin/api/stats');
+                const statsResponse = await fetch(ADMIN_PATH + '/api/stats');
                 const stats = await statsResponse.json();
 
                 document.getElementById('total-requests').textContent = stats.total_requests;
@@ -697,7 +699,7 @@
                 document.getElementById('credential-stuffers').textContent = stats.classification_breakdown.credential_stuffer || 0;
                 document.getElementById('critical-threats').textContent = stats.critical_threats || 0;
 
-                const requestsResponse = await fetch('/admin/api/requests?limit=100');
+                const requestsResponse = await fetch(ADMIN_PATH + '/api/requests?limit=100');
                 const requests = await requestsResponse.json();
 
                 const feed = document.getElementById('request-feed');

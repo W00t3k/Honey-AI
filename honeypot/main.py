@@ -73,7 +73,11 @@ async def lifespan(app: FastAPI):
     # Set database for admin routes
     set_database(db)
 
-    console.print(f"\n[bold green]Honeypot active on {HOST}:{PORT}[/bold green]")
+    from routers.admin import ADMIN_PATH
+    console.print(f"\n[bold green]Listening on {HOST}:{PORT}[/bold green]")
+    console.print(f"[dim]Admin UI : http://127.0.0.1:{PORT}{ADMIN_PATH}[/dim]")
+    if ADMIN_PATH == "/admin":
+        console.print("[yellow]⚠  Set ADMIN_PATH in .env to a secret path before deploying publicly[/yellow]")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
     yield
@@ -117,6 +121,7 @@ app.include_router(chat_router)
 app.include_router(models_router)
 app.include_router(embeddings_router)
 app.include_router(billing_router)
+# Admin router self-manages its prefix via ADMIN_PATH env var (set in .env)
 app.include_router(admin_router)
 
 
@@ -195,10 +200,12 @@ async def catch_all(request: Request, path: str):
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
 
+    # Match real OpenAI 404 format exactly
     response_data = {
         "error": {
-            "message": f"Unknown endpoint: /{path}",
+            "message": "Not Found",
             "type": "invalid_request_error",
+            "param": None,
             "code": None,
         }
     }
@@ -213,14 +220,14 @@ async def catch_all(request: Request, path: str):
         body_raw=body_raw,
         body_parsed=body_parsed,
         response_body=response_body,
-        response_status=200,  # Always 200
+        response_status=404,
         response_time_ms=response_time_ms,
     )
 
     return Response(
         content=response_body,
         media_type="application/json",
-        status_code=200,  # Always 200 - never reveal it's a honeypot
+        status_code=404,
     )
 
 

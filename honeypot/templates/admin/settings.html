@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeypot Settings</title>
+    <title>Settings</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -191,9 +191,9 @@
 </head>
 <body>
     <header class="header">
-        <h1>🍯 Honeypot Settings</h1>
+        <h1>Settings</h1>
         <div class="header-actions">
-            <a href="/admin" class="btn btn-secondary">← Dashboard</a>
+            <a href="{{ admin_path }}" class="btn btn-secondary">← Dashboard</a>
             <button class="btn btn-primary" onclick="saveAll()">💾 Save All</button>
         </div>
     </header>
@@ -332,7 +332,7 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label><strong>From Address</strong></label>
-                            <input type="email" class="form-control" id="smtp_from" placeholder="honeypot@example.com" value="{{ config.smtp_from }}">
+                            <input type="email" class="form-control" id="smtp_from" placeholder="alerts@example.com" value="{{ config.smtp_from }}">
                         </div>
                         <div class="form-group">
                             <label><strong>To Addresses</strong> (comma-separated)</label>
@@ -452,7 +452,7 @@
                 <div class="switch-group">
                     <div class="switch-label">
                         <strong>Log Response Body</strong>
-                        <span>Store honeypot responses</span>
+                        <span>Store API response bodies</span>
                     </div>
                     <label class="switch">
                         <input type="checkbox" id="log_response" {{ 'checked' if config.log_response }}>
@@ -496,7 +496,7 @@
             <div class="section-body">
                 <div class="form-group">
                     <label><strong>Fake Organization Name</strong></label>
-                    <input type="text" class="form-control" id="fake_org_name" value="{{ config.fake_org_name }}" placeholder="org-honeypot">
+                    <input type="text" class="form-control" id="fake_org_name" value="{{ config.fake_org_name }}" placeholder="org-internal">
                     <p class="form-hint">Appears in OpenAI-style response headers</p>
                 </div>
                 <div class="form-row">
