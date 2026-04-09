@@ -465,15 +465,24 @@ class RequestLogger:
         if data.get("api_key"):
             key = data["api_key"]
             from services.responder import get_responder
+            from services.config import get_config
             is_canary = key in get_responder().issued_canary_keys
+            canary_label = None
+            # Check operator-defined canary tokens too
+            for ct in get_config().get("canary_tokens", []):
+                if ct.get("token") == key:
+                    is_canary = True
+                    canary_label = ct.get("label", "custom canary")
+                    break
             if len(key) > 20:
                 redacted = f"{key[:12]}...{key[-6:]}"
             else:
                 redacted = key
             if is_canary:
+                label_str = f" [{canary_label}]" if canary_label else ""
                 table.add_row(
                     "API Key",
-                    f"[bold red on yellow] 🎯 CANARY KEY USED: {redacted} [/bold red on yellow]",
+                    f"[bold red on yellow] 🎯 CANARY KEY USED{label_str}: {redacted} [/bold red on yellow]",
                 )
             else:
                 table.add_row("API Key", f"[bold yellow]{redacted}[/bold yellow]")

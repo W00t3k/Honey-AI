@@ -8,6 +8,7 @@ import csv
 import io
 import json
 import os
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -34,9 +35,9 @@ SECRET_KEY = os.getenv("JWT_SECRET", "change-this-secret-key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-# Credentials from env
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
+# Fallback env credentials (used only when setup not yet complete)
+_ENV_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+_ENV_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -113,19 +114,86 @@ def get_database() -> Database:
     return _db
 
 
+def _check_credentials(username: str, password: str) -> bool:
+    """Verify admin credentials against config (bcrypt) or env fallback."""
+    config = get_config()
+    if config.is_setup_done():
+        stored_user = config.get("admin_username", "")
+        stored_hash = config.get("admin_password", "")
+        if username != stored_user:
+            return False
+        if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+            return pwd_context.verify(password, stored_hash)
+        return password == stored_hash  # plaintext fallback
+    else:
+        return username == _ENV_ADMIN_USERNAME and password == _ENV_ADMIN_PASSWORD
+
+
+@router.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    """First-run setup wizard."""
+    config = get_config()
+    if config.is_setup_done():
+        return RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
+    return templates.TemplateResponse(
+        "admin/setup.html",
+        {"request": request, "error": None, "admin_path": ADMIN_PATH},
+    )
+
+
+@router.post("/setup")
+async def setup_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    """Handle first-run setup form."""
+    config = get_config()
+    if config.is_setup_done():
+        return RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
+
+    error = None
+    if len(username) < 3:
+        error = "Username must be at least 3 characters."
+    elif username.lower() in ("admin", "administrator", "root"):
+        error = "Choose a less obvious username."
+    elif len(password) < 10:
+        error = "Password must be at least 10 characters."
+    elif password.lower() in ("changeme", "password", "admin", "12345678", "honeypot"):
+        error = "That password is too common. Choose something stronger."
+    elif password != confirm_password:
+        error = "Passwords do not match."
+
+    if error:
+        return templates.TemplateResponse(
+            "admin/setup.html",
+            {"request": request, "error": error, "admin_path": ADMIN_PATH},
+        )
+
+    password_hash = pwd_context.hash(password)
+    config.complete_setup(username=username, password_hash=password_hash)
+    return RedirectResponse(url=f"{ADMIN_PATH}/login?setup=done", status_code=303)
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    """Render login page."""
+    """Render login page, redirect to setup if not configured."""
+    config = get_config()
+    if not config.is_setup_done():
+        return RedirectResponse(url=f"{ADMIN_PATH}/setup", status_code=303)
+    setup_done = request.query_params.get("setup") == "done"
     return templates.TemplateResponse(
         "admin/login.html",
-        {"request": request, "error": None, "admin_path": ADMIN_PATH},
+        {"request": request, "error": None, "admin_path": ADMIN_PATH,
+         "setup_done": setup_done},
     )
 
 
 @router.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Handle login form submission."""
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+    if _check_credentials(username, password):
         access_token = create_access_token(data={"sub": username})
         response = RedirectResponse(url=ADMIN_PATH, status_code=303)
         response.set_cookie(
@@ -139,7 +207,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
 
     return templates.TemplateResponse(
         "admin/login.html",
-        {"request": request, "error": "Invalid credentials", "admin_path": ADMIN_PATH},
+        {"request": request, "error": "Invalid credentials", "admin_path": ADMIN_PATH,
+         "setup_done": False},
     )
 
 
@@ -149,6 +218,59 @@ async def logout():
     response = RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
     response.delete_cookie(key="access_token")
     return response
+
+
+@router.get("/tokens", response_class=HTMLResponse)
+async def tokens_page(request: Request):
+    """Canary token management page."""
+    user = await get_current_user(request)
+    if not user:
+        return RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
+    config = get_config()
+    tokens = config.get("canary_tokens", [])
+    return templates.TemplateResponse(
+        "admin/tokens.html",
+        {"request": request, "tokens": tokens, "admin_path": ADMIN_PATH},
+    )
+
+
+@router.post("/api/tokens")
+async def add_token(request: Request):
+    """Add a new canary token."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    label = data.get("label", "").strip()
+    token = data.get("token", "").strip()
+    note = data.get("note", "").strip()
+    if not label or not token:
+        raise HTTPException(status_code=400, detail="label and token are required")
+    config = get_config()
+    tokens = list(config.get("canary_tokens", []))
+    if any(t["token"] == token for t in tokens):
+        raise HTTPException(status_code=409, detail="Token already exists")
+    tokens.append({
+        "id": str(uuid.uuid4())[:8],
+        "label": label,
+        "token": token,
+        "note": note,
+        "added_at": datetime.utcnow().isoformat(),
+    })
+    config.update(canary_tokens=tokens)
+    return {"status": "ok", "count": len(tokens)}
+
+
+@router.delete("/api/tokens/{token_id}")
+async def delete_token(request: Request, token_id: str):
+    """Remove a canary token by ID."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    config = get_config()
+    tokens = [t for t in config.get("canary_tokens", []) if t.get("id") != token_id]
+    config.update(canary_tokens=tokens)
+    return {"status": "ok", "count": len(tokens)}
 
 
 @router.get("", response_class=HTMLResponse)

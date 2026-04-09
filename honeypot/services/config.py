@@ -57,16 +57,17 @@ class HoneypotConfig:
 
     # Admin Settings
     admin_username: str = "admin"
-    admin_password: str = ""  # Set via GUI on first run
+    admin_password: str = ""  # bcrypt hash stored here after setup
     jwt_secret: str = ""
+    setup_complete: bool = False  # True after first-run wizard is done
 
     # GeoIP
     geoip_enabled: bool = True
     geoip_db_path: str = "./GeoLite2-City.mmdb"
     maxmind_license_key: str = ""
 
-    # Canary Tokens (for internal deployment)
-    canary_tokens: list = field(default_factory=list)  # API keys to track specifically
+    # Canary Tokens — list of {"id": str, "label": str, "token": str, "added_at": str, "note": str}
+    canary_tokens: list = field(default_factory=list)
 
     # Response Customization
     fake_org_name: str = "org-honeypot"
@@ -130,11 +131,20 @@ class ConfigService:
                 with open(CONFIG_FILE) as f:
                     data = json.load(f)
                     for key, value in data.items():
-                        if hasattr(self.config, key) and value:  # Only override non-empty values
-                            setattr(self.config, key, value)
+                        if hasattr(self.config, key):
+                            # Always restore setup_complete and canary_tokens even if falsy
+                            if key in ("setup_complete", "canary_tokens"):
+                                setattr(self.config, key, value)
+                            elif value:  # Only override non-empty values for other fields
+                                setattr(self.config, key, value)
                 console.print(f"[green]Loaded config from {CONFIG_FILE}[/green]")
             except Exception as e:
                 console.print(f"[yellow]Config load warning: {e}[/yellow]")
+
+        # Backwards-compat: if ADMIN_PASSWORD env var is a non-default value, treat setup as done
+        env_pw = os.getenv("ADMIN_PASSWORD", "")
+        if env_pw and env_pw not in ("changeme", "admin", "") and not self.config.setup_complete:
+            self.config.setup_complete = True
 
     def save(self):
         """Save configuration to file."""
@@ -146,6 +156,17 @@ class ConfigService:
         except Exception as e:
             console.print(f"[red]Config save failed: {e}[/red]")
             return False
+
+    def is_setup_done(self) -> bool:
+        """Return True if first-run setup has been completed."""
+        return self.config.setup_complete
+
+    def complete_setup(self, username: str, password_hash: str) -> bool:
+        """Save admin credentials and mark setup as complete."""
+        self.config.admin_username = username
+        self.config.admin_password = password_hash
+        self.config.setup_complete = True
+        return self.save()
 
     def update(self, **kwargs) -> bool:
         """Update configuration values."""

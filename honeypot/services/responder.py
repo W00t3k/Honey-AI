@@ -411,41 +411,68 @@ class ResponseGenerator:
         }
 
     def api_keys(self) -> dict:
-        """Generate fake API keys list (high-value lure)."""
+        """Generate fake API keys list (high-value lure).
+
+        Includes both randomly generated canary keys AND any custom canary tokens
+        added by the operator via the admin UI.
+        """
         keys = []
         now = datetime.now()
 
-        # Generate some fake keys
-        for i in range(random.randint(2, 5)):
+        # Randomly generated canary keys
+        for i in range(random.randint(2, 4)):
             created = now - timedelta(days=random.randint(1, 90))
             last_used = now - timedelta(hours=random.randint(1, 72))
+            keys.append({
+                "object": "api_key",
+                "id": f"key-{uuid.uuid4().hex[:24]}",
+                "name": random.choice(
+                    ["Production", "Development", "Testing", "Backend", "Mobile App"]
+                ) + f" Key {i + 1}",
+                "key": self._issue_canary_key(),
+                "created_at": int(created.timestamp()),
+                "last_used_at": int(last_used.timestamp()),
+                "owner": {
+                    "type": "user",
+                    "user": {
+                        "id": f"user-{uuid.uuid4().hex[:24]}",
+                        "name": "API User",
+                        "email": f"user{random.randint(1, 999)}@example.com",
+                    },
+                },
+            })
 
-            keys.append(
-                {
+        # Append custom canary tokens from operator config (highest value lures)
+        try:
+            from services.config import get_config
+            custom_tokens = get_config().get("canary_tokens", [])
+            for ct in custom_tokens:
+                token_val = ct.get("token", "")
+                if not token_val:
+                    continue
+                self.issued_canary_keys.add(token_val)
+                created = now - timedelta(days=random.randint(30, 365))
+                keys.append({
                     "object": "api_key",
                     "id": f"key-{uuid.uuid4().hex[:24]}",
-                    "name": random.choice(
-                        ["Production", "Development", "Testing", "Backend", "Mobile App"]
-                    )
-                    + f" Key {i + 1}",
-                    "key": self._issue_canary_key(),  # This is the honey
+                    "name": ct.get("label", "API Key"),
+                    "key": token_val,
                     "created_at": int(created.timestamp()),
-                    "last_used_at": int(last_used.timestamp()),
+                    "last_used_at": int((now - timedelta(hours=random.randint(1, 24))).timestamp()),
                     "owner": {
                         "type": "user",
                         "user": {
                             "id": f"user-{uuid.uuid4().hex[:24]}",
                             "name": "API User",
-                            "email": f"user{random.randint(1,999)}@example.com",
+                            "email": f"user{random.randint(1, 99)}@company.com",
                         },
                     },
-                }
-            )
+                })
+        except Exception:
+            pass
 
-        return {
-            "object": "list",
-            "data": keys,
-        }
+        random.shuffle(keys)
+        return {"object": "list", "data": keys}
 
     def _issue_canary_key(self) -> str:
         """Generate a canary API key and record it for later detection."""

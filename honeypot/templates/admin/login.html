@@ -123,6 +123,11 @@
             <p>Sign in to continue</p>
         </div>
 
+        {% if setup_done %}
+        <div style="background:rgba(104,211,145,0.1);border:1px solid rgba(104,211,145,0.35);color:#68d391;padding:12px;border-radius:6px;margin-bottom:20px;font-size:13px;">
+            ✅ Setup complete. Sign in with your new credentials.
+        </div>
+        {% endif %}
         {% if error %}
         <div class="error">{{ error }}</div>
         {% endif %}
