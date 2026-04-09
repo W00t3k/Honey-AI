@@ -414,7 +414,10 @@ class RequestClassifier:
 
             # Non-browser user agent characteristics
             browser_indicators = ["mozilla", "chrome", "safari", "firefox", "edge", "opera"]
-            if not any(b in user_agent.lower() for b in browser_indicators):
+            if any(b in user_agent.lower() for b in browser_indicators):
+                scores["human"] += 0.35
+                reasons.append("Browser user agent")
+            else:
                 scores["scanner"] += 0.1
                 reasons.append("Non-browser user agent")
 
@@ -449,10 +452,17 @@ class RequestClassifier:
                         reasons.append(f"Test key pattern: {pattern.pattern[:20]}")
                     break
 
-            # Valid-looking OpenAI key format
+            # Valid-looking OpenAI key format (random chars, long)
             if re.match(r"sk-(proj-)?[a-zA-Z0-9]{40,}", api_key):
                 scores["credential_stuffer"] += 0.4
                 reasons.append("Valid OpenAI key format")
+
+            # Readable/label-style key — human-chosen phrase, not random bytes
+            # e.g. sk-ui-session-key, sk-my-test-key, sk-dev-backend
+            elif re.match(r"sk(-[a-z][a-z0-9]*){2,}$", api_key, re.IGNORECASE) and len(api_key) < 35:
+                scores["credential_stuffer"] += 0.2
+                scores["human"] += 0.15
+                reasons.append(f"Label-style key (dev/test placeholder): {api_key}")
 
             # Extremely short or obviously fake
             if len(api_key) < 10:
@@ -545,6 +555,10 @@ class RequestClassifier:
             if missing_browser >= 2:
                 scores["scanner"] += 0.15 * missing_browser
                 reasons.append(f"Missing {missing_browser} browser headers")
+            elif missing_browser == 0:
+                # All standard browser headers present — positive human signal
+                scores["human"] += 0.1
+                reasons.append("All standard browser headers present")
 
             # Suspicious custom headers
             suspicious_header_names = ["x-debug", "x-test", "x-admin", "x-backdoor", "x-exploit", "x-inject"]
@@ -605,9 +619,11 @@ class RequestClassifier:
         # Determine final classification
         max_score = max(scores.values())
         if max_score < 0.2:
+            # Confidence reflects how little signal we actually have
+            no_signal_confidence = round(0.2 + max_score, 2)
             return ClassificationResult(
                 classification="unknown",
-                confidence=0.5,
+                confidence=no_signal_confidence,
                 reasons=reasons or ["Insufficient signals"],
                 all_scores=scores,
             )
