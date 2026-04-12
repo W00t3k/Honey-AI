@@ -49,19 +49,25 @@ REQUEST DATA:
 - Model Requested: {model}
 - Request Body: {body}
 
-CONTEXT: This is a fake OpenAI API honeypot. ALL traffic is unauthorized. The attacker may be:
-1. Testing stolen API credentials (credential stuffing)
-2. Performing reconnaissance (enumerating endpoints, models, org users, files)
+CONTEXT: This is a multi-provider AI honeypot mimicking OpenAI, Anthropic, and MCP servers. ALL traffic is unauthorized. The attacker may be:
+1. Testing stolen API credentials (OpenAI sk-proj-*, Anthropic sk-ant-*, OpenRouter sk-or-*)
+2. Performing reconnaissance (enumerating endpoints, models, org users, files, vector stores)
 3. Attempting prompt injection or system-prompt extraction
 4. Trying to exfiltrate data via LLM responses
 5. Scanning for vulnerabilities (rate limits, SSRF, path traversal)
-6. Using an LLM framework/SDK with a stolen key (LangChain, LiteLLM, etc.)
-7. Probing for IDOR vulnerabilities in org/user/file endpoints
+6. Using an LLM framework/SDK with a stolen key (LangChain, LiteLLM, CrewAI, AutoGPT, etc.)
+7. Probing for IDOR vulnerabilities in org/user/file/vector store endpoints
+8. Probing the MCP (Model Context Protocol) server to enumerate tools and resources
+9. Attempting MCP tool call injection (injecting via tool results or resource content)
+10. Attempting indirect prompt injection via MCP resources (file://, database:// URIs)
+11. Testing the OpenAI Responses API with malicious tool definitions
+12. Submitting batch jobs to run bulk operations covertly
+13. Testing RAG pipeline poisoning via vector store endpoints
 
 Respond ONLY in this exact JSON format (no extra text):
 {{
     "threat_level": "low|medium|high|critical",
-    "threat_type": "reconnaissance|credential_testing|prompt_injection|data_exfiltration|automated_scanner|manual_probe|api_abuse|jailbreak|unknown",
+    "threat_type": "reconnaissance|credential_testing|prompt_injection|data_exfiltration|automated_scanner|manual_probe|api_abuse|jailbreak|mcp_probe|mcp_tool_injection|rag_poisoning|agentic_abuse|unknown",
     "summary": "One concise sentence describing what this attacker is doing",
     "details": "2-4 sentences: what TTPs are evident, what goal the attacker likely has, and any noteworthy patterns in the payload",
     "recommendations": ["Specific action 1", "Specific action 2", "Specific action 3"],

@@ -152,6 +152,21 @@ SCANNER_USER_AGENTS = [
     r"autogen",
     r"crewai",
     r"dspy",
+
+    # Agentic / MCP clients
+    r"claude-desktop",
+    r"cursor/",
+    r"continue-dev",
+    r"copilot",
+    r"mcp-client",
+    r"mcp-inspector",
+    r"model-context-protocol",
+    r"smithery",
+    r"cline/",
+    r"aider",
+    r"opendevin",
+    r"swe-agent",
+    r"agentops",
 ]
 
 # Prompt injection/extraction patterns
@@ -214,6 +229,15 @@ PROMPT_EXTRACTION_PATTERNS = [
     r"prompt leak",
     r"many-shot (jailbreak|prompting)",
     r"grandma (trick|exploit|jailbreak)",
+    # MCP / agentic injection patterns
+    r"tool_result.*inject",
+    r"<tool_result>",
+    r"\[tool_call\]",
+    r"function_call.*inject",
+    r"tool_use.*override",
+    # Indirect prompt injection via MCP resources
+    r"ignore (the|all) (previous|prior) (instructions|tool|resource)",
+    r"when (the|this) (tool|function|resource) (returns|responds|completes)",
 ]
 
 # Data exfiltration patterns
@@ -263,6 +287,19 @@ DATA_EXFIL_PATTERNS = [
     r"169\.254\.169\.254",  # AWS IMDS (SSRF lure)
     r"metadata\.google\.internal",  # GCP IMDS
     r"169\.254\.170\.2",   # ECS metadata
+    # MCP-specific resource exfil
+    r"file://",            # MCP file resource URI
+    r"database://",        # MCP database resource URI
+    r"resources/read",     # MCP resource read
+    r"canary_secret",      # Our own canary credentials being echoed back
+    r"canary_user_token",  # Canary token reuse
+    # RAG poisoning patterns
+    r"ignore (this|the|all|previous) (context|document|result|retrieval)",
+    r"disregard (retrieved|the|this) (document|context|chunk|result)",
+    r"the (above|following|retrieved) (text|document|context) is (wrong|outdated|incorrect)",
+    r"new (instructions|system|context):",
+    # Audio/voice injection
+    r"ignore (previous|all|prior) instructions",  # Spoken injection in audio
 ]
 
 # Test API key patterns (likely credential stuffing)
@@ -441,6 +478,31 @@ class RequestClassifier:
 
         # Check API key patterns
         if api_key:
+            # Anthropic key format — high-value signal
+            if re.match(r"sk-ant-[a-zA-Z0-9\-_]{20,}", api_key):
+                scores["credential_stuffer"] += 0.6
+                reasons.append("Anthropic API key format (sk-ant-*) — likely stolen/testing")
+
+            # Google AI / Gemini key (AIza + 35 chars)
+            elif re.match(r"AIza[A-Za-z0-9\-_]{35}", api_key):
+                scores["credential_stuffer"] += 0.6
+                reasons.append("Google AI/Gemini API key format (AIza*)")
+
+            # HuggingFace token
+            elif re.match(r"hf_[A-Za-z0-9]{20,}", api_key):
+                scores["credential_stuffer"] += 0.5
+                reasons.append("HuggingFace API token (hf_*)")
+
+            # Cohere API key
+            elif re.match(r"[A-Za-z0-9]{40}$", api_key) and len(api_key) == 40:
+                scores["credential_stuffer"] += 0.3
+                reasons.append("Possible Cohere API key (40-char alphanumeric)")
+
+            # OpenRouter key format
+            elif re.match(r"sk-or-[a-zA-Z0-9\-_]{20,}", api_key):
+                scores["credential_stuffer"] += 0.5
+                reasons.append("OpenRouter API key format (sk-or-*)")
+
             # Test/placeholder keys
             for pattern in self.test_key_patterns:
                 if pattern.search(api_key):
@@ -479,6 +541,54 @@ class RequestClassifier:
             content_to_check += prompt
         if body:
             content_to_check += " " + body
+
+        # Agentic signals in body structure
+        if body and isinstance(body, str):
+            try:
+                import json as _json
+                body_obj = _json.loads(body)
+                if isinstance(body_obj, dict):
+                    # tool_calls present = model requested tool execution (agentic loop)
+                    if body_obj.get("tool_calls"):
+                        scores["credential_stuffer"] += 0.3
+                        reasons.append("tool_calls in request body (agentic loop in progress)")
+
+                    # role=tool messages = tool result injection
+                    msgs = body_obj.get("messages", [])
+                    tool_msgs = [m for m in msgs if isinstance(m, dict) and m.get("role") == "tool"]
+                    if tool_msgs:
+                        scores["prompt_harvester"] += 0.4
+                        reasons.append(f"Tool result messages present ({len(tool_msgs)}) — potential injection point")
+
+                    # tool_choice=required forces tool call — attacker testing tool execution
+                    if body_obj.get("tool_choice") == "required":
+                        scores["credential_stuffer"] += 0.25
+                        reasons.append("tool_choice=required (forcing tool execution)")
+
+                    # computer_use tool type (Anthropic) — direct system access
+                    tools = body_obj.get("tools", [])
+                    if isinstance(tools, list):
+                        for t in tools:
+                            if isinstance(t, dict) and t.get("type") == "computer_use":
+                                scores["data_exfil"] += 0.5
+                                reasons.append("computer_use tool type — desktop/GUI access attempt")
+                                break
+
+                    # MCP sampling/createMessage — server-initiated LLM call injection
+                    if body_obj.get("method") == "sampling/createMessage":
+                        scores["prompt_harvester"] += 0.6
+                        reasons.append("MCP sampling/createMessage — server attempting to inject LLM prompt")
+            except Exception:
+                pass
+
+        # ReAct pattern detection in content (agent orchestration frameworks)
+        if content_to_check:
+            if re.search(r"\bThought\s*:", content_to_check) and re.search(r"\bAction\s*:", content_to_check):
+                scores["credential_stuffer"] += 0.3
+                reasons.append("ReAct pattern detected (Thought/Action) — agent framework")
+            if re.search(r"\bObservation\s*:", content_to_check):
+                scores["credential_stuffer"] += 0.2
+                reasons.append("ReAct Observation token — agent loop iteration")
 
         if content_to_check:
             # Prompt injection/extraction
@@ -521,6 +631,27 @@ class RequestClassifier:
                 "/v1/files",
                 "/v1/assistants",
                 "/v1/threads",
+                "/v1/vector_stores",
+                "/v1/batches",
+                "/v1/responses",
+                # MCP endpoints
+                "/mcp",
+                "/.well-known/mcp.json",
+                # Anthropic high-value endpoints
+                "/v1/messages/batches",
+                # Vector DB endpoints
+                "/query",
+                "/upsert",
+                "/describe_index_stats",
+                "/api/v1/collections",
+                "/v1/schema",
+                "/v1/graphql",
+                "/v1/objects",
+                # Gemini
+                "/v1beta/models",
+                # Audio (injection vector)
+                "/v1/audio/transcriptions",
+                "/v1/audio/speech",
             ]
             if any(p in path for p in sensitive_paths):
                 scores["recon"] += 0.3
@@ -585,6 +716,40 @@ class RequestClassifier:
                 pkg_ver = lower_headers.get("x-stainless-package-version", "?")
                 lang = lower_headers.get("x-stainless-lang", "?")
                 reasons.append(f"OpenAI SDK fingerprint via x-stainless headers (lang={lang}, ver={pkg_ver})")
+
+            # Anthropic-version header — direct Anthropic API client
+            if "anthropic-version" in lower_headers:
+                scores["credential_stuffer"] += 0.5
+                reasons.append(f"Anthropic API client (anthropic-version: {lower_headers['anthropic-version']})")
+
+            # MCP session header — MCP client connecting
+            if "mcp-session-id" in lower_headers:
+                scores["recon"] += 0.4
+                scores["scanner"] += 0.2
+                reasons.append("MCP client connecting (mcp-session-id header present)")
+
+            # Agentic framework headers
+            if any(k.startswith("x-langchain") for k in lower_headers):
+                scores["credential_stuffer"] += 0.4
+                reasons.append("LangChain framework header detected")
+            if any(k.startswith("x-crewai") for k in lower_headers):
+                scores["credential_stuffer"] += 0.4
+                reasons.append("CrewAI framework header detected")
+
+            # Anthropic beta features — reveals which advanced capabilities attacker is probing
+            beta = lower_headers.get("anthropic-beta", "")
+            if beta:
+                scores["credential_stuffer"] += 0.3
+                if "computer-use" in beta:
+                    scores["data_exfil"] += 0.4
+                    reasons.append(f"Anthropic computer-use beta requested — desktop/GUI access probe")
+                elif "interleaved-thinking" in beta or "extended-thinking" in beta:
+                    scores["prompt_harvester"] += 0.3
+                    reasons.append(f"Anthropic extended-thinking beta requested")
+                elif "prompt-caching" in beta:
+                    reasons.append(f"Anthropic prompt-caching beta (bulk/automated use pattern)")
+                else:
+                    reasons.append(f"Anthropic beta feature: {beta[:60]}")
 
             # Proxy chain indicators — suggests automated/scripted environment
             if "x-forwarded-for" in lower_headers and "x-real-ip" in lower_headers:

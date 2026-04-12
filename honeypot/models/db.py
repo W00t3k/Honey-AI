@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -46,6 +46,13 @@ SCHEMA_MIGRATIONS = {
         ("ai_iocs", "JSON"),
         ("ai_confidence", "FLOAT"),
         ("ai_analyzed_at", "DATETIME"),
+    ],
+    3: [
+        # Protocol tagging for metrics breakdown
+        # Values: openai_api | anthropic_api | mcp | web | unknown
+        ("protocol", "VARCHAR(20)"),
+        # Whether the request contained tool_calls (agentic signal)
+        ("has_tool_calls", "BOOLEAN"),
     ],
 }
 
@@ -97,6 +104,12 @@ class Request(Base):
     classification = Column(String(50), nullable=True, index=True)
     classification_confidence = Column(Float, nullable=True)
     classification_reasons = Column(JSON, nullable=True)
+
+    # Protocol / source type for metric segmentation
+    # openai_api | anthropic_api | mcp | web | unknown
+    protocol = Column(String(20), nullable=True, index=True)
+    # True if the request body contained tool_calls (agentic loop signal)
+    has_tool_calls = Column(Boolean, nullable=True, index=True)
 
     # Metadata
     is_flagged = Column(Boolean, default=False, index=True)
@@ -151,6 +164,8 @@ class Request(Base):
             "classification": self.classification,
             "classification_confidence": self.classification_confidence,
             "classification_reasons": self.classification_reasons,
+            "protocol": self.protocol,
+            "has_tool_calls": self.has_tool_calls,
             "is_flagged": self.is_flagged,
             "notes": self.notes,
             "threat_level": self.threat_level,
@@ -321,12 +336,31 @@ class Database:
             )
             requests_per_hour = [{"hour": r[0], "count": r[1]} for r in hourly.all()]
 
+            # Protocol breakdown (openai_api / anthropic_api / mcp / web / unknown)
+            protocols = await session.execute(
+                select(Request.protocol, func.count(Request.id).label('count'))
+                .group_by(Request.protocol)
+                .order_by(func.count(Request.id).desc())
+            )
+            protocol_breakdown = {
+                (r[0] or "unknown"): r[1] for r in protocols.all()
+            }
+
+            # Agentic requests (contain tool_calls)
+            agentic_count_result = await session.execute(
+                select(func.count(Request.id))
+                .where(Request.has_tool_calls == True)  # noqa: E712
+            )
+            agentic_count = agentic_count_result.scalar() or 0
+
             return {
                 "total_requests": total_count,
                 "unique_ips": unique_ip_count,
                 "unique_api_keys": unique_key_count,
                 "top_countries": top_countries,
                 "classification_breakdown": classification_breakdown,
+                "protocol_breakdown": protocol_breakdown,
+                "agentic_requests": agentic_count,
                 "top_paths": top_paths,
                 "top_asn_orgs": top_asn_orgs,
                 "requests_per_hour": requests_per_hour,

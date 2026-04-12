@@ -277,9 +277,16 @@
         .badge.scanner { background: rgba(251, 191, 36, 0.2); color: var(--warning); }
         .badge.credential_stuffer { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
         .badge.prompt_harvester { background: rgba(192, 132, 252, 0.2); color: #c084fc; }
+        .badge.data_exfil { background: rgba(220, 38, 38, 0.25); color: #f87171; border: 1px solid rgba(220,38,38,0.4); }
+        .badge.recon { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
         .badge.researcher { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
         .badge.human { background: rgba(74, 222, 128, 0.2); color: var(--success); }
         .badge.unknown { background: rgba(100, 100, 150, 0.2); color: var(--text-secondary); }
+        /* Protocol source badges */
+        .badge.proto-openai_api { background: rgba(96,165,250,0.1); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); font-size: 10px; }
+        .badge.proto-anthropic_api { background: rgba(192,132,252,0.1); color: #c084fc; border: 1px solid rgba(192,132,252,0.3); font-size: 10px; }
+        .badge.proto-mcp { background: rgba(167,139,250,0.15); color: #a78bfa; border: 1px solid rgba(167,139,250,0.4); font-size: 10px; }
+        .badge.proto-web { background: rgba(148,163,184,0.1); color: #94a3b8; border: 1px solid rgba(148,163,184,0.2); font-size: 10px; }
 
         .threat-badge {
             padding: 2px 8px;
@@ -477,6 +484,18 @@
                 <h3>Credential Stuffers</h3>
                 <div class="stat-value" id="credential-stuffers">{{ stats.classification_breakdown.get('credential_stuffer', 0) }}</div>
             </div>
+            <div class="stat-card" style="border-color: rgba(139, 92, 246, 0.4);">
+                <h3>MCP Probes</h3>
+                <div class="stat-value" id="mcp-probes" style="color: #a78bfa;">{{ stats.protocol_breakdown.get('mcp', 0) }}</div>
+            </div>
+            <div class="stat-card" style="border-color: rgba(34, 197, 94, 0.4);">
+                <h3>Agentic (tool_calls)</h3>
+                <div class="stat-value" id="agentic-requests" style="color: #4ade80;">{{ stats.get('agentic_requests', 0) }}</div>
+            </div>
+            <div class="stat-card critical" style="border-color: rgba(251, 191, 36, 0.6); background: rgba(251, 191, 36, 0.05);">
+                <h3>🎯 Canary Reuses</h3>
+                <div class="stat-value" id="canary-reuses" style="color: #fbbf24;">0</div>
+            </div>
             <div class="stat-card critical">
                 <h3>High/Critical Threats</h3>
                 <div class="stat-value" id="critical-threats">{{ stats.get('critical_threats', 0) }}</div>
@@ -516,7 +535,10 @@
                             <div class="request-meta">
                                 <span class="request-ip">{{ req.source_ip }}</span>
                                 {% if req.country_name %}<span>{{ req.country_name }}</span>{% endif %}
+                                {% if req.protocol %}<span class="badge proto-{{ req.protocol }}">{{ req.protocol }}</span>{% endif %}
                                 {% if req.classification %}<span class="badge {{ req.classification }}">{{ req.classification }}</span>{% endif %}
+                                {% if req.has_tool_calls %}<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border-color:#4ade80;">tool_calls</span>{% endif %}
+                                {% if req.is_flagged %}<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border-color:#fbbf24;">🎯 canary</span>{% endif %}
                                 {% if req.threat_level %}<span class="threat-badge {{ req.threat_level }}">{{ req.threat_level }}</span>{% endif %}
                             </div>
                             <div class="ai-analysis" id="analysis-{{ req.id }}">
@@ -577,6 +599,23 @@
                             {% for class_name, count in stats.classification_breakdown.items() %}
                             <li class="classification-item">
                                 <span class="badge {{ class_name }}">{{ class_name }}</span>
+                                <span>{{ count }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2>Protocol Breakdown</h2>
+                    </div>
+                    <div class="panel-body">
+                        <ul class="classification-list" id="protocol-list">
+                            {% set proto_colors = {'openai_api': '#60a5fa', 'anthropic_api': '#c084fc', 'mcp': '#a78bfa', 'web': '#94a3b8'} %}
+                            {% for proto, count in stats.get('protocol_breakdown', {}).items() %}
+                            <li class="classification-item">
+                                <span style="font-family: monospace; font-size: 12px; color: {{ proto_colors.get(proto, '#e4e4e4') }};">{{ proto }}</span>
                                 <span>{{ count }}</span>
                             </li>
                             {% endfor %}
@@ -699,6 +738,25 @@
                 document.getElementById('unique-keys').textContent = stats.unique_api_keys;
                 document.getElementById('credential-stuffers').textContent = stats.classification_breakdown.credential_stuffer || 0;
                 document.getElementById('critical-threats').textContent = stats.critical_threats || 0;
+                document.getElementById('mcp-probes').textContent = (stats.protocol_breakdown && stats.protocol_breakdown.mcp) || 0;
+                document.getElementById('agentic-requests').textContent = stats.agentic_requests || 0;
+
+                // Canary reuses: count flagged requests from latest feed
+                const canaryCount = (await fetch(ADMIN_PATH + '/api/requests?limit=500').then(r => r.json()).catch(() => [])).filter(r => r.is_flagged).length;
+                document.getElementById('canary-reuses').textContent = canaryCount;
+
+                // Protocol breakdown panel
+                const protoList = document.getElementById('protocol-list');
+                if (protoList && stats.protocol_breakdown) {
+                    const protoColors = {openai_api:'#60a5fa', anthropic_api:'#c084fc', mcp:'#a78bfa', web:'#94a3b8'};
+                    protoList.innerHTML = Object.entries(stats.protocol_breakdown)
+                        .sort((a,b) => b[1]-a[1])
+                        .map(([proto, count]) => `
+                            <li class="classification-item">
+                                <span style="font-family:monospace;font-size:12px;color:${protoColors[proto]||'#e4e4e4'}">${proto}</span>
+                                <span>${count}</span>
+                            </li>`).join('');
+                }
 
                 const requestsResponse = await fetch(ADMIN_PATH + '/api/requests?limit=100');
                 const requests = await requestsResponse.json();
@@ -717,7 +775,10 @@
                         <div class="request-meta">
                             <span class="request-ip">${req.source_ip}</span>
                             ${req.country_name ? `<span>${req.country_name}</span>` : ''}
+                            ${req.protocol ? `<span class="badge proto-${req.protocol}">${req.protocol}</span>` : ''}
                             ${req.classification ? `<span class="badge ${req.classification}">${req.classification}</span>` : ''}
+                            ${req.has_tool_calls ? `<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid #4ade80">tool_calls</span>` : ''}
+                            ${req.is_flagged ? `<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24">🎯 canary</span>` : ''}
                             ${req.threat_level ? `<span class="threat-badge ${req.threat_level}">${req.threat_level}</span>` : ''}
                         </div>
                         <div class="ai-analysis" id="analysis-${req.id}">

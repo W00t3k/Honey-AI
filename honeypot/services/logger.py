@@ -132,6 +132,7 @@ class RequestLogger:
         temperature = None
         max_tokens = None
         stream = None
+        has_tool_calls = False
 
         if body_parsed:
             model_requested = body_parsed.get("model")
@@ -140,6 +141,42 @@ class RequestLogger:
             temperature = body_parsed.get("temperature")
             max_tokens = body_parsed.get("max_tokens")
             stream = body_parsed.get("stream", False)
+
+            # Detect tool_calls — present in agentic loops (model requesting a tool)
+            # or in messages that contain tool result injection
+            if messages and isinstance(messages, list):
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        if msg.get("tool_calls") or msg.get("role") == "tool":
+                            has_tool_calls = True
+                            break
+            # Also check top-level tools/tool_calls fields (Responses API, Anthropic)
+            if body_parsed.get("tools") or body_parsed.get("tool_calls"):
+                has_tool_calls = True
+
+        # Determine protocol from path
+        path_str = str(request.url.path)
+        auth_val = headers.get("authorization", "")
+        if path_str.startswith("/mcp") or path_str == "/.well-known/mcp.json":
+            protocol = "mcp"
+        elif (
+            headers.get("anthropic-version")
+            or (isinstance(auth_val, str) and "sk-ant-" in auth_val)
+            or path_str in ("/v1/messages", "/v1/messages/batches")
+        ):
+            protocol = "anthropic_api"
+        elif path_str.startswith("/v1beta/") or headers.get("x-goog-api-key") or (
+            isinstance(auth_val, str) and "AIza" in auth_val
+        ):
+            protocol = "gemini_api"
+        elif path_str.startswith(("/query", "/upsert", "/fetch", "/delete", "/describe_index_stats",
+                                   "/api/v1/collections", "/v1/schema", "/v1/graphql", "/v1/objects",
+                                   "/v1/meta")):
+            protocol = "vector_db"
+        elif path_str.startswith("/v1/"):
+            protocol = "openai_api"
+        else:
+            protocol = "web"
 
         # Generate session fingerprint
         fingerprint = generate_session_fingerprint(
@@ -197,6 +234,8 @@ class RequestLogger:
             "classification": classification_result.classification,
             "classification_confidence": classification_result.confidence,
             "classification_reasons": classification_result.reasons,
+            "protocol": protocol,
+            "has_tool_calls": has_tool_calls,
         }
 
         # Log to database first to get ID
@@ -224,6 +263,10 @@ class RequestLogger:
         # Console output with correct ID
         self._print_request_verbose(request_id, request_data, classification_result, extended_data)
 
+        # Canary key reuse detection — check if this key was previously served by us
+        if api_key:
+            asyncio.create_task(self._check_canary_reuse(request_id, api_key, request_data))
+
         # Run Groq analysis in background (don't block response)
         asyncio.create_task(self._analyze_and_update(request_id, request_data))
 
@@ -231,6 +274,105 @@ class RequestLogger:
         asyncio.create_task(self._send_alerts(request_id, request_data, classification_result))
 
         return request_id
+
+    async def _check_canary_reuse(self, request_id: int, api_key: str, data: dict):
+        """
+        Check if an incoming API key matches one we previously issued (canary token reuse).
+
+        This is the closed-loop: key served → key reused → confirmed theft.
+        Two sources of canary keys:
+          1. Randomly generated keys issued by /v1/organization/api-keys
+          2. Operator-defined canary tokens from admin UI config
+
+        When a match is found:
+          - Flag the request in the DB
+          - Print a high-visibility alert to console
+          - Fire the alert webhook
+        """
+        try:
+            from services.responder import get_responder
+            from services.config import get_config
+
+            responder = get_responder()
+            config = get_config()
+
+            canary_label = None
+            is_canary = api_key in responder.issued_canary_keys
+
+            # Check operator-defined tokens
+            if not is_canary:
+                for ct in config.get("canary_tokens", []):
+                    if ct.get("token") == api_key:
+                        is_canary = True
+                        canary_label = ct.get("label", "custom canary")
+                        break
+
+            # Check MCP resource canary values — these appear in resource content,
+            # not in auth headers, but an attacker might copy them to a real provider
+            mcp_canary_prefixes = [
+                "canary_secret_value_for_",
+                "canary_user_token_",
+                "canary_sql_result_",
+                "canary_http_response_",
+                "canary_email_",
+            ]
+            if not is_canary:
+                for prefix in mcp_canary_prefixes:
+                    if api_key.startswith(prefix):
+                        is_canary = True
+                        canary_label = f"MCP resource canary ({prefix}...)"
+                        break
+
+            if not is_canary:
+                return
+
+            label_str = f" [{canary_label}]" if canary_label else ""
+
+            # Flag the request in DB
+            async with self.db.async_session() as session:
+                from sqlalchemy import select as sa_select
+                from models.db import Request as DBRequest
+                result = await session.execute(
+                    sa_select(DBRequest).where(DBRequest.id == request_id)
+                )
+                req = result.scalar_one_or_none()
+                if req:
+                    req.is_flagged = True
+                    existing_notes = req.notes or ""
+                    req.notes = f"CANARY REUSE{label_str}: key={api_key[:20]}... | {existing_notes}".strip(" |")
+                    await session.commit()
+
+            # Console alert
+            from rich.panel import Panel as RichPanel
+            console.print()
+            console.print(RichPanel(
+                f"[bold white]🎯 CANARY KEY REUSE CONFIRMED{label_str}[/bold white]\n\n"
+                f"[yellow]Key:[/yellow]    {api_key[:20]}...\n"
+                f"[yellow]Used by:[/yellow] {data['source_ip']} ({data.get('country_name', 'Unknown')})\n"
+                f"[yellow]Path:[/yellow]   {data['method']} {data['path']}\n"
+                f"[yellow]UA:[/yellow]     {str(data.get('user_agent', 'none'))[:80]}\n\n"
+                f"[dim]Request #{request_id} has been flagged in the database.[/dim]",
+                title="[bold red on white] CONFIRMED CREDENTIAL THEFT [/bold red on white]",
+                border_style="bold red",
+            ))
+            console.print()
+
+            # Fire alert webhook
+            from services.alerts import get_alert_service
+            alert_service = get_alert_service()
+            await alert_service.send_alert(
+                title=f"🎯 CANARY KEY REUSED — Confirmed Credential Theft #{request_id}",
+                classification="credential_stuffer",
+                confidence=1.0,
+                source_ip=data["source_ip"],
+                country=data.get("country_name", "Unknown"),
+                path=data["path"],
+                api_key=api_key,
+                reasons=[f"Canary key reuse confirmed{label_str}"],
+            )
+
+        except Exception as e:
+            console.print(f"[red]Canary check error: {e}[/red]")
 
     async def _send_alerts(self, request_id: int, data: dict, classification: ClassificationResult):
         """Send webhook alerts for high-threat requests."""

@@ -30,6 +30,12 @@ from routers import (
     models_router,
     embeddings_router,
     billing_router,
+    anthropic_router,
+    mcp_router,
+    agentic_router,
+    audio_router,
+    gemini_router,
+    vectordb_router,
     admin_router,
     set_database,
 )
@@ -39,7 +45,7 @@ console = Console()
 # Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./honeypot.db")
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
+PORT = int(os.getenv("PORT", "80"))
 GEOIP_DB_PATH = os.getenv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb")
 
 # Database instance
@@ -116,11 +122,17 @@ def country_flag(country_code: str) -> str:
 
 templates.env.filters["country_flag"] = country_flag
 
-# Include routers
+# Include routers — order matters: specific routes before catch-all
 app.include_router(chat_router)
 app.include_router(models_router)
 app.include_router(embeddings_router)
 app.include_router(billing_router)
+app.include_router(anthropic_router)
+app.include_router(mcp_router)
+app.include_router(agentic_router)
+app.include_router(audio_router)
+app.include_router(gemini_router)
+app.include_router(vectordb_router)
 # Admin router self-manages its prefix via ADMIN_PATH env var (set in .env)
 app.include_router(admin_router)
 
