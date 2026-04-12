@@ -498,48 +498,37 @@
                 <button class="btn btn-primary" onclick="createKey()">+ Create new key</button>
             </div>
             <div class="api-key-list" id="api-key-list">
-                <div class="api-key-item">
+                {% for ct in canary_tokens %}
+                <div class="api-key-item" id="key-row-{{ ct.id }}">
+                    <div class="key-info">
+                        <div class="key-icon">🔑</div>
+                        <div class="key-details">
+                            <h4>{{ ct.label }}</h4>
+                            <code class="key-value" id="key-{{ ct.id }}">{{ ct.token }}</code>
+                            <div class="key-meta">Created <span class="dynamic-date" data-days-ago="{{ loop.index * 9 }}"></span> • Last used {{ loop.index }} day{{ 's' if loop.index != 1 else '' }} ago</div>
+                        </div>
+                    </div>
+                    <div class="key-actions">
+                        <button class="copy-btn" onclick="copyKey('key-{{ ct.id }}')">📋 Copy</button>
+                        <button class="copy-btn btn-danger" onclick="revokeKey('{{ ct.id }}', '{{ ct.token }}')">Revoke</button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="api-key-item" id="key-row-default">
                     <div class="key-info">
                         <div class="key-icon">🔑</div>
                         <div class="key-details">
                             <h4>Production Key</h4>
-                            <code class="key-value" id="key-1">sk-proj-aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789ABCDEFG</code>
+                            <code class="key-value" id="key-default">sk-proj-aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789ABCDEFG</code>
                             <div class="key-meta">Created <span class="dynamic-date" data-days-ago="8"></span> • Last used 2 hours ago</div>
                         </div>
                     </div>
                     <div class="key-actions">
-                        <button class="copy-btn" onclick="copyKey('key-1')">📋 Copy</button>
-                        <button class="copy-btn btn-danger">Revoke</button>
+                        <button class="copy-btn" onclick="copyKey('key-default')">📋 Copy</button>
+                        <button class="copy-btn btn-danger" onclick="revokeKey('default', '')">Revoke</button>
                     </div>
                 </div>
-                <div class="api-key-item">
-                    <div class="key-info">
-                        <div class="key-icon">🔑</div>
-                        <div class="key-details">
-                            <h4>Development Key</h4>
-                            <code class="key-value" id="key-2">sk-proj-xYz789AbCdEfGhIjKlMnOpQrStUvWx0123456789XY</code>
-                            <div class="key-meta">Created <span class="dynamic-date" data-days-ago="24"></span> • Last used 5 minutes ago</div>
-                        </div>
-                    </div>
-                    <div class="key-actions">
-                        <button class="copy-btn" onclick="copyKey('key-2')">📋 Copy</button>
-                        <button class="copy-btn btn-danger">Revoke</button>
-                    </div>
-                </div>
-                <div class="api-key-item">
-                    <div class="key-info">
-                        <div class="key-icon">🔑</div>
-                        <div class="key-details">
-                            <h4>CI/CD Pipeline</h4>
-                            <code class="key-value" id="key-3">sk-proj-PiPeLiNe987654321ZyXwVuTsRqPoNmLkJiHgFeDcBa</code>
-                            <div class="key-meta">Created <span class="dynamic-date" data-days-ago="40"></span> • Last used 1 day ago</div>
-                        </div>
-                    </div>
-                    <div class="key-actions">
-                        <button class="copy-btn" onclick="copyKey('key-3')">📋 Copy</button>
-                        <button class="copy-btn btn-danger">Revoke</button>
-                    </div>
-                </div>
+                {% endfor %}
             </div>
         </div>
 
@@ -642,30 +631,58 @@
             }).catch(() => {});
         }
 
-        function createKey() {
-            // Generate a fake key
-            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRsTuVwXyZ0123456789';
-            let key = 'sk-proj-';
-            for (let i = 0; i < 48; i++) {
-                key += chars.charAt(Math.floor(Math.random() * chars.length));
+        function revokeKey(id, token) {
+            if (!confirm('Revoke this API key? This action cannot be undone.')) return;
+            const row = document.getElementById('key-row-' + id);
+            if (row) {
+                row.style.transition = 'opacity 0.4s';
+                row.style.opacity = '0';
+                setTimeout(() => row.remove(), 400);
             }
+            const toast = document.getElementById('toast');
+            toast.textContent = 'API key revoked.';
+            toast.classList.add('show');
+            setTimeout(() => { toast.classList.remove('show'); toast.textContent = 'Copied to clipboard!'; }, 2500);
+            fetch('/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || 'revoked'), 'X-Dashboard-Action': 'key_revoke' },
+                body: JSON.stringify({ model: 'gpt-4o', messages: [{role:'user', content:'key_revoke_event'}], _meta: {action:'dashboard_key_revoke', key_id: id} })
+            }).catch(() => {});
+        }
 
+        function createKey() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            const key = 'sk-proj-' + Array.from({length: 48}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+            const id = 'new-' + Date.now();
+            const list = document.getElementById('api-key-list');
+            const row = document.createElement('div');
+            row.className = 'api-key-item';
+            row.id = 'key-row-' + id;
+            row.style.opacity = '0';
+            row.style.transition = 'opacity 0.4s';
+            row.innerHTML = `
+                <div class="key-info">
+                    <div class="key-icon">🔑</div>
+                    <div class="key-details">
+                        <h4>New Key</h4>
+                        <code class="key-value" id="key-${id}">${key}</code>
+                        <div class="key-meta">Created just now • Never used</div>
+                    </div>
+                </div>
+                <div class="key-actions">
+                    <button class="copy-btn" onclick="copyKey('key-${id}')">📋 Copy</button>
+                    <button class="copy-btn btn-danger" onclick="revokeKey('${id}', '${key}')">Revoke</button>
+                </div>`;
+            list.prepend(row);
+            setTimeout(() => row.style.opacity = '1', 50);
             const toast = document.getElementById('toast');
             toast.textContent = 'New API key created!';
             toast.classList.add('show');
-            setTimeout(() => {
-                toast.classList.remove('show');
-                toast.textContent = 'Copied to clipboard!';
-            }, 2000);
-
-            // Log this interaction
+            setTimeout(() => { toast.classList.remove('show'); toast.textContent = 'Copied to clipboard!'; }, 2500);
             fetch('/v1/organization/api-keys', {
                 method: 'POST',
-                headers: {
-                    'Authorization': 'Bearer dashboard-session',
-                    'X-Dashboard-Action': 'key_create'
-                },
-                body: JSON.stringify({ action: 'create_key', key: key })
+                headers: { 'Authorization': 'Bearer ' + key, 'X-Dashboard-Action': 'key_create' },
+                body: JSON.stringify({ action: 'create_key', key })
             }).catch(() => {});
         }
 

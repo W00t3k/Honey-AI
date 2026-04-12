@@ -164,13 +164,17 @@ async def add_custom_headers(request: Request, call_next):
 @app.get("/")
 async def root(request: Request):
     """Root endpoint - fake OpenAI dashboard (honeypot lure)."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    from services.config import get_config
+    canary_tokens = get_config().get("canary_tokens", [])[:6]
+    return templates.TemplateResponse("index.html", {"request": request, "canary_tokens": canary_tokens})
 
 
 @app.get("/dashboard")
 async def dashboard(request: Request):
     """Dashboard alias."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    from services.config import get_config
+    canary_tokens = get_config().get("canary_tokens", [])[:6]
+    return templates.TemplateResponse("index.html", {"request": request, "canary_tokens": canary_tokens})
 
 
 @app.get("/api")
