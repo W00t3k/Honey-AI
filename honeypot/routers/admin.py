@@ -27,6 +27,15 @@ ADMIN_PATH = os.getenv("ADMIN_PATH", "/admin")
 router = APIRouter(prefix=ADMIN_PATH)
 templates = Jinja2Templates(directory="templates")
 
+
+def _country_flag(country_code: str) -> str:
+    if not country_code or len(country_code) != 2:
+        return "🌐"
+    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in country_code.upper())
+
+
+templates.env.filters["country_flag"] = _country_flag
+
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
