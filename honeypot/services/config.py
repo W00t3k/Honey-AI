@@ -6,6 +6,10 @@ Allows runtime configuration via admin GUI instead of .env files.
 
 import os
 import json
+import random
+import string
+import uuid
+from datetime import datetime, timezone
 from typing import Optional, Any
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
@@ -146,6 +150,9 @@ class ConfigService:
         if env_pw and env_pw not in ("changeme", "admin", "") and not self.config.setup_complete:
             self.config.setup_complete = True
 
+        # Auto-seed canary tokens if none exist
+        self._auto_seed_canary_tokens()
+
     def save(self):
         """Save configuration to file."""
         try:
@@ -156,6 +163,35 @@ class ConfigService:
         except Exception as e:
             console.print(f"[red]Config save failed: {e}[/red]")
             return False
+
+    def _auto_seed_canary_tokens(self):
+        """Generate a persistent pool of canary tokens on first run."""
+        if self.config.canary_tokens:
+            return
+        labels = [
+            ("Production API Key", "sk-proj-"),
+            ("GitHub Actions CI", "sk-proj-"),
+            ("Backend Service", "sk-"),
+            ("Data Pipeline", "sk-proj-"),
+            ("Internal Tooling", "sk-"),
+            ("Analytics Service", "sk-proj-"),
+            ("Mobile App Backend", "sk-"),
+            ("Staging Environment", "sk-proj-"),
+        ]
+        chars = string.ascii_letters + string.digits
+        tokens = []
+        for label, prefix in labels:
+            key = "".join(random.choices(chars, k=48))
+            tokens.append({
+                "id": uuid.uuid4().hex[:8],
+                "label": label,
+                "token": f"{prefix}{key}",
+                "note": "auto-generated",
+                "added_at": datetime.now(timezone.utc).isoformat(),
+            })
+        self.config.canary_tokens = tokens
+        self.save()
+        console.print(f"[cyan]Auto-seeded {len(tokens)} canary tokens[/cyan]")
 
     def is_setup_done(self) -> bool:
         """Return True if first-run setup has been completed."""

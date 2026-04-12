@@ -87,6 +87,28 @@ class ResponseGenerator:
     def __init__(self):
         self.models = self._get_models()
         self.issued_canary_keys: set[str] = set()  # Track keys we've served
+        self._load_persistent_canary_keys()
+
+    def _load_persistent_canary_keys(self):
+        """Pre-populate issued_canary_keys from the persistent config pool."""
+        try:
+            from services.config import get_config
+            for ct in get_config().get("canary_tokens", []):
+                if ct.get("token"):
+                    self.issued_canary_keys.add(ct["token"])
+        except Exception:
+            pass
+
+    def get_canary_token(self, index: int = 0) -> str:
+        """Return a specific persistent canary token by index (wraps around)."""
+        try:
+            from services.config import get_config
+            tokens = [ct["token"] for ct in get_config().get("canary_tokens", []) if ct.get("token")]
+            if tokens:
+                return tokens[index % len(tokens)]
+        except Exception:
+            pass
+        return self._issue_canary_key()
 
     def _get_models(self) -> list[dict]:
         """Get list of available models."""
