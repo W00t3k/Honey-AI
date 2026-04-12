@@ -36,6 +36,8 @@ from routers import (
     audio_router,
     gemini_router,
     vectordb_router,
+    azure_router,
+    cohere_router,
     admin_router,
     set_database,
 )
@@ -123,6 +125,8 @@ def country_flag(country_code: str) -> str:
 templates.env.filters["country_flag"] = country_flag
 
 # Include routers — order matters: specific routes before catch-all
+app.include_router(azure_router)
+app.include_router(cohere_router)
 app.include_router(chat_router)
 app.include_router(models_router)
 app.include_router(embeddings_router)
