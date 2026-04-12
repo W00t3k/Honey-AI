@@ -250,11 +250,16 @@ async def add_token(request: Request):
     if not user:
         raise HTTPException(status_code=401)
     data = await request.json()
+    import random, string as _string
     label = data.get("label", "").strip()
     token = data.get("token", "").strip()
     note = data.get("note", "").strip()
-    if not label or not token:
-        raise HTTPException(status_code=400, detail="label and token are required")
+    if not label:
+        raise HTTPException(status_code=400, detail="label is required")
+    if not token:
+        prefix = random.choice(["sk-proj-", "sk-"])
+        chars = _string.ascii_letters + _string.digits
+        token = prefix + "".join(random.choices(chars, k=48))
     config = get_config()
     tokens = list(config.get("canary_tokens", []))
     if any(t["token"] == token for t in tokens):

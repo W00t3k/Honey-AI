@@ -242,9 +242,12 @@
                 <input type="text" id="label" placeholder="e.g. GitHub repo leak" autocomplete="off">
             </div>
             <div class="form-group">
-                <label>Token Value</label>
-                <input type="text" id="token" class="token-input"
-                       placeholder="sk-proj-... or any API key format" autocomplete="off" spellcheck="false">
+                <label>Token Value <span style="color:#555; font-weight:400;">(leave blank to auto-generate)</span></label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="text" id="token" class="token-input" style="flex:1;"
+                           placeholder="sk-proj-... or leave blank to generate" autocomplete="off" spellcheck="false">
+                    <button class="btn btn-secondary" type="button" onclick="generateToken()" style="white-space:nowrap;">⚡ Generate</button>
+                </div>
             </div>
         </div>
         <div class="form-group" style="margin-bottom:16px;">
@@ -308,14 +311,27 @@
         setTimeout(() => { t.style.display = 'none'; }, 3000);
     }
 
+    function generateToken() {
+        const prefix = Math.random() < 0.5 ? 'sk-proj-' : 'sk-';
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        const key = Array.from({length: 48}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        document.getElementById('token').value = prefix + key;
+    }
+
     async function addToken() {
         const label = document.getElementById('label').value.trim();
-        const token = document.getElementById('token').value.trim();
+        let token   = document.getElementById('token').value.trim();
         const note  = document.getElementById('note').value.trim();
 
-        if (!label || !token) {
-            showToast('Label and token are required.', true);
+        if (!label) {
+            showToast('Label is required.', true);
             return;
+        }
+        // Auto-generate token if blank
+        if (!token) {
+            const prefix = Math.random() < 0.5 ? 'sk-proj-' : 'sk-';
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            token = prefix + Array.from({length: 48}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
         }
 
         try {
