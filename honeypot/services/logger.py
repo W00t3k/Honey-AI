@@ -223,6 +223,20 @@ class RequestLogger:
                     classification_result.reasons + agent_signal.reasons
                 )
 
+        # Broadcast trap hit immediately (before DB write so dashboard lights up fast)
+        if agent_signal.trap_hit:
+            try:
+                from services.ws_feed import get_ws_manager
+                asyncio.create_task(get_ws_manager().emit_trap_hit(
+                    request_id=0,  # ID not known yet; updated below after DB write
+                    trap_type=agent_signal.trap_type or "unknown",
+                    source_ip=client_ip,
+                    path=str(request.url.path),
+                    delta_ms=agent_signal.response_delta_ms,
+                ))
+            except Exception:
+                pass
+
         framework = detect_framework(
             user_agent=headers.get("user-agent"),
             headers=headers,
@@ -298,6 +312,13 @@ class RequestLogger:
         # Log to database first to get ID
         logged = await self.db.log_request(request_data)
         request_id = logged.id
+
+        # Broadcast to live dashboard WebSocket clients immediately
+        try:
+            from services.ws_feed import get_ws_manager
+            asyncio.create_task(get_ws_manager().emit_new_request(request_id, request_data))
+        except Exception:
+            pass
 
         # Build extended data for verbose console output
         extended_data = {
@@ -418,6 +439,20 @@ class RequestLogger:
             ))
             console.print()
 
+            # Broadcast canary hit to live dashboard clients
+            try:
+                from services.ws_feed import get_ws_manager
+                asyncio.create_task(get_ws_manager().emit_canary_hit(
+                    request_id=request_id,
+                    api_key=api_key,
+                    source_ip=data["source_ip"],
+                    country=data.get("country_name", "Unknown"),
+                    path=data["path"],
+                    label=canary_label or "canary",
+                ))
+            except Exception:
+                pass
+
             # Fire alert webhook
             from services.alerts import get_alert_service
             alert_service = get_alert_service()
@@ -490,6 +525,13 @@ class RequestLogger:
                     ai_confidence=analysis.confidence,
                     ai_actor_type=getattr(analysis, "actor_type", "unknown"),
                 )
+
+                # Broadcast analysis update to live dashboard clients
+                try:
+                    from services.ws_feed import get_ws_manager
+                    asyncio.create_task(get_ws_manager().emit_analysis(request_id, analysis))
+                except Exception:
+                    pass
 
                 # Print analysis to console
                 self._print_analysis(request_id, analysis)

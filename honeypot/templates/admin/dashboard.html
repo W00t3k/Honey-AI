@@ -539,7 +539,7 @@
         <div class="header-actions">
             <div class="refresh-indicator">
                 <span class="refresh-dot"></span>
-                <span>Live</span>
+                <span id="feed-status" style="color:var(--warning);">Connecting…</span>
             </div>
             <a href="{{ admin_path }}/tokens" class="btn btn-secondary">🎯 Canary Tokens</a>
             <a href="{{ admin_path }}/settings" class="btn btn-secondary">⚙️ Settings</a>
@@ -601,7 +601,7 @@
                         <h2>Live Request Feed</h2>
                         <span class="refresh-indicator">
                             <span class="refresh-dot"></span>
-                            Auto-refresh: 5s | Click request for AI analysis
+                            Real-time push | Click request for AI analysis
                         </span>
                     </div>
                     <div class="request-feed" id="request-feed">
@@ -939,22 +939,265 @@
                 </div>`;
         }
 
-        async function refreshData() {
+        // ── Alert toast ───────────────────────────────────────────────────
+        const toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = `
+            position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+            display: flex; flex-direction: column-reverse; gap: 10px;
+            pointer-events: none;
+        `;
+        document.body.appendChild(toastContainer);
+
+        function showToast(title, body, level = 'info') {
+            const colors = {
+                canary:   { bg: 'rgba(251,191,36,0.15)',  border: '#fbbf24', icon: '🎯' },
+                trap:     { bg: 'rgba(233,69,96,0.15)',   border: '#e94560', icon: '⚡' },
+                critical: { bg: 'rgba(220,38,38,0.15)',   border: '#dc2626', icon: '🔴' },
+                info:     { bg: 'rgba(96,165,250,0.12)',  border: '#60a5fa', icon: '📡' },
+            };
+            const c = colors[level] || colors.info;
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                background: ${c.bg}; border: 1px solid ${c.border};
+                border-radius: 10px; padding: 12px 16px; min-width: 280px; max-width: 380px;
+                pointer-events: all; backdrop-filter: blur(8px);
+                box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+                animation: slideIn 0.3s ease;
+            `;
+            toast.innerHTML = `
+                <div style="font-weight:700;font-size:13px;color:${c.border};margin-bottom:4px;">${c.icon} ${esc(title)}</div>
+                <div style="font-size:12px;color:var(--text-secondary);line-height:1.4;">${esc(body)}</div>
+            `;
+            toastContainer.appendChild(toast);
+            setTimeout(() => toast.style.opacity = '0', 4500);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        // Inject keyframe animation once
+        if (!document.getElementById('toast-anim')) {
+            const style = document.createElement('style');
+            style.id = 'toast-anim';
+            style.textContent = `@keyframes slideIn { from { transform: translateX(40px); opacity:0; } to { transform: translateX(0); opacity:1; } }`;
+            document.head.appendChild(style);
+        }
+
+        // ── Live feed state ───────────────────────────────────────────────
+        // Map of request_id → rendered row data (so analysis can patch rows)
+        const feedRows = {};
+        const MAX_FEED_ROWS = 100;
+
+        function prependRequestRow(req) {
+            // Track in map
+            feedRows[req.id] = req;
+            // Keep map bounded
+            const ids = Object.keys(feedRows).map(Number).sort((a,b) => a-b);
+            if (ids.length > MAX_FEED_ROWS + 20) {
+                ids.slice(0, ids.length - MAX_FEED_ROWS).forEach(id => delete feedRows[id]);
+            }
+
+            const feed = document.getElementById('request-feed');
+            const html = renderRequestItem(req);
+            feed.insertAdjacentHTML('afterbegin', html);
+
+            // Trim DOM to MAX_FEED_ROWS
+            const children = feed.querySelectorAll('.request-item');
+            if (children.length > MAX_FEED_ROWS) {
+                children[children.length - 1].remove();
+            }
+        }
+
+        function patchAnalysisOnRow(requestId, analysisData) {
+            // Update in-memory row data
+            if (feedRows[requestId]) {
+                Object.assign(feedRows[requestId], analysisData);
+            }
+
+            // Patch the live DOM row
+            const item = document.querySelector(`.request-item[data-id="${requestId}"]`);
+            if (!item) return;
+
+            // Update threat badge in meta row
+            const meta = item.querySelector('.request-meta');
+            if (meta && analysisData.threat_level) {
+                const existing = meta.querySelector('.threat-badge');
+                if (existing) existing.remove();
+                const badge = document.createElement('span');
+                badge.className = `threat-badge ${analysisData.threat_level}`;
+                badge.textContent = analysisData.threat_level;
+                meta.appendChild(badge);
+            }
+            // Update actor badge
+            if (meta && analysisData.ai_actor_type && analysisData.ai_actor_type !== 'unknown') {
+                const existingActor = meta.querySelector('.badge[class*="actor-"]');
+                if (!existingActor) {
+                    meta.insertAdjacentHTML('beforeend', renderActorBadge(analysisData.ai_actor_type));
+                }
+            }
+
+            // Patch analysis panel content if it exists
+            const panel = item.querySelector('.ai-analysis');
+            if (panel && analysisData.ai_summary) {
+                const iocs = (analysisData.ai_iocs && analysisData.ai_iocs.length)
+                    ? `<div class="ai-iocs"><h4>IOCs</h4><div class="ioc-list">${analysisData.ai_iocs.map(i => `<span class="ioc-pill">${esc(i)}</span>`).join('')}</div></div>`
+                    : '';
+                const recs = (analysisData.ai_recommendations && analysisData.ai_recommendations.length)
+                    ? `<div class="ai-recommendations"><h4>Recommendations</h4><ul>${analysisData.ai_recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div>`
+                    : '';
+                // Replace analysis content (keep trap banner + observables)
+                const existingHeader = panel.querySelector('.ai-analysis-header');
+                const existingObs = panel.querySelector('.observables-grid');
+                if (existingHeader) existingHeader.remove();
+                const existingSummary = panel.querySelector('.ai-summary');
+                if (existingSummary) existingSummary.remove();
+                const existingDetails = panel.querySelector('.ai-details');
+                if (existingDetails) existingDetails.remove();
+                const existingRecs = panel.querySelector('.ai-recommendations');
+                if (existingRecs) existingRecs.remove();
+                const existingIocs = panel.querySelector('.ai-iocs');
+                if (existingIocs) existingIocs.remove();
+
+                const insertTarget = panel.querySelector('.trap-hit-banner') || panel.firstChild;
+                const analysisHtml = `
+                    <div class="ai-analysis-header">
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        Groq AI Analysis
+                        ${analysisData.ai_actor_type ? renderActorBadge(analysisData.ai_actor_type) : ''}
+                        ${analysisData.ai_confidence ? `<span style="color:var(--text-secondary);font-size:11px;">${Math.round(analysisData.ai_confidence*100)}% confidence</span>` : ''}
+                    </div>
+                    <div class="ai-summary">${esc(analysisData.ai_summary)}</div>
+                    ${analysisData.ai_details ? `<div class="ai-details">${esc(analysisData.ai_details)}</div>` : ''}
+                    ${recs}${iocs}`;
+                if (insertTarget) {
+                    insertTarget.insertAdjacentHTML('afterend', analysisHtml);
+                } else {
+                    panel.insertAdjacentHTML('afterbegin', analysisHtml);
+                }
+            }
+        }
+
+        function patchCanaryOnRow(requestId) {
+            const item = document.querySelector(`.request-item[data-id="${requestId}"]`);
+            if (!item) return;
+            const meta = item.querySelector('.request-meta');
+            if (meta && !meta.querySelector('.canary-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'canary-badge badge';
+                badge.style.cssText = 'background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24';
+                badge.textContent = '🎯 canary';
+                meta.appendChild(badge);
+            }
+        }
+
+        // ── WebSocket connection ──────────────────────────────────────────
+        let ws = null;
+        let wsReconnectTimer = null;
+        let pollFallbackInterval = null;
+        let wsAlive = false;
+
+        function connectWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws/feed`);
+
+            ws.onopen = () => {
+                wsAlive = true;
+                // Stop poll fallback if WS is healthy
+                if (pollFallbackInterval) {
+                    clearInterval(pollFallbackInterval);
+                    pollFallbackInterval = null;
+                }
+                document.getElementById('feed-status').textContent = 'WebSocket';
+                document.getElementById('feed-status').style.color = 'var(--success)';
+                // Ping every 25s to keep the connection alive through proxies
+                ws._pingInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+                }, 25000);
+            };
+
+            ws.onmessage = (evt) => {
+                try {
+                    const msg = JSON.parse(evt.data);
+                    handleFeedEvent(msg);
+                } catch(e) {}
+            };
+
+            ws.onclose = ws.onerror = () => {
+                wsAlive = false;
+                if (ws._pingInterval) clearInterval(ws._pingInterval);
+                document.getElementById('feed-status').textContent = 'Polling (5s)';
+                document.getElementById('feed-status').style.color = 'var(--warning)';
+                // Fall back to polling while reconnecting
+                if (!pollFallbackInterval) {
+                    pollFallbackInterval = setInterval(refreshStatsOnly, 5000);
+                }
+                // Reconnect after 3s
+                wsReconnectTimer = setTimeout(connectWS, 3000);
+            };
+        }
+
+        function handleFeedEvent(msg) {
+            switch (msg.type) {
+                case 'request_new':
+                    prependRequestRow(msg.data);
+                    updateStatCounter('total-requests', 1, true);
+                    break;
+
+                case 'request_analysis':
+                    patchAnalysisOnRow(msg.request_id, msg.data);
+                    if (msg.data.threat_level === 'critical' || msg.data.threat_level === 'high') {
+                        updateStatCounter('critical-threats', 1, true);
+                        if (msg.data.threat_level === 'critical') {
+                            showToast(
+                                `Critical threat #${msg.request_id}`,
+                                msg.data.ai_summary || msg.data.threat_type || '',
+                                'critical'
+                            );
+                        }
+                    }
+                    break;
+
+                case 'canary_hit':
+                    patchCanaryOnRow(msg.request_id);
+                    updateStatCounter('canary-reuses', 1, true);
+                    showToast(
+                        `🎯 Canary key reused! #${msg.request_id}`,
+                        `${msg.data.source_ip} (${msg.data.country || '?'}) → ${msg.data.path}`,
+                        'canary'
+                    );
+                    break;
+
+                case 'trap_hit':
+                    showToast(
+                        `⚡ Agent trap hit! #${msg.request_id}`,
+                        `${msg.data.trap_type} — ${msg.data.source_ip} → ${msg.data.path}`,
+                        'trap'
+                    );
+                    break;
+            }
+        }
+
+        function updateStatCounter(id, delta, increment = false) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (increment) {
+                el.textContent = (parseInt(el.textContent || '0', 10) + delta).toString();
+            } else {
+                el.textContent = delta.toString();
+            }
+        }
+
+        // ── Polling fallback (stats + sidebar panels only, not feed) ──────
+        async function refreshStatsOnly() {
             try {
-                const statsResponse = await fetch(ADMIN_PATH + '/api/stats');
-                const stats = await statsResponse.json();
-
-                document.getElementById('total-requests').textContent = stats.total_requests;
-                document.getElementById('unique-ips').textContent = stats.unique_ips;
-                document.getElementById('unique-keys').textContent = stats.unique_api_keys;
-                document.getElementById('credential-stuffers').textContent = stats.classification_breakdown.credential_stuffer || 0;
-                document.getElementById('critical-threats').textContent = stats.critical_threats || 0;
-                document.getElementById('mcp-probes').textContent = (stats.protocol_breakdown && stats.protocol_breakdown.mcp) || 0;
-                document.getElementById('agentic-requests').textContent = stats.agentic_requests || 0;
-
-                // Canary reuses: count flagged requests from latest feed
-                const canaryCount = (await fetch(ADMIN_PATH + '/api/requests?limit=500').then(r => r.json()).catch(() => [])).filter(r => r.is_flagged).length;
-                document.getElementById('canary-reuses').textContent = canaryCount;
+                const res = await fetch(ADMIN_PATH + '/api/stats');
+                const stats = await res.json();
+                updateStatCounter('total-requests', stats.total_requests);
+                updateStatCounter('unique-ips', stats.unique_ips);
+                updateStatCounter('unique-keys', stats.unique_api_keys);
+                updateStatCounter('credential-stuffers', stats.classification_breakdown?.credential_stuffer || 0);
+                updateStatCounter('critical-threats', stats.critical_threats || 0);
+                updateStatCounter('mcp-probes', stats.protocol_breakdown?.mcp || 0);
+                updateStatCounter('agentic-requests', stats.agentic_requests || 0);
 
                 // Actor type breakdown panel
                 const actorList = document.getElementById('actor-type-list');
@@ -968,7 +1211,6 @@
                                 <span>${count}</span>
                             </li>`).join('');
                 }
-
                 // Protocol breakdown panel
                 const protoList = document.getElementById('protocol-list');
                 if (protoList && stats.protocol_breakdown) {
@@ -981,19 +1223,30 @@
                                 <span>${count}</span>
                             </li>`).join('');
                 }
+            } catch(e) {}
+        }
 
-                const requestsResponse = await fetch(ADMIN_PATH + '/api/requests?limit=100');
-                const requests = await requestsResponse.json();
+        // ── Full page refresh (initial load on reconnect) ─────────────────
+        async function refreshData() {
+            try {
+                await refreshStatsOnly();
 
+                const canaryCount = (await fetch(ADMIN_PATH + '/api/requests?limit=500')
+                    .then(r => r.json()).catch(() => []))
+                    .filter(r => r.is_flagged).length;
+                updateStatCounter('canary-reuses', canaryCount);
+
+                const requests = await fetch(ADMIN_PATH + '/api/requests?limit=100')
+                    .then(r => r.json());
                 const feed = document.getElementById('request-feed');
                 feed.innerHTML = requests.map(req => renderRequestItem(req)).join('');
-            } catch (error) {
-                console.error('Failed to refresh data:', error);
-            }
+                requests.forEach(req => { feedRows[req.id] = req; });
+            } catch(e) {}
         }
 
         loadMapData();
-        setInterval(refreshData, 5000);
+        refreshData();    // initial full load
+        connectWS();      // start real-time feed
     </script>
 </body>
 </html>

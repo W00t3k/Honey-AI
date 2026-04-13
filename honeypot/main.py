@@ -16,7 +16,7 @@ import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from rich.console import Console
@@ -221,6 +221,37 @@ async def agent_trap_verify(request: Request, token: str):
         status_code=401,
         media_type="application/json",
     )
+
+
+@app.websocket("/ws/feed")
+async def ws_feed(websocket: WebSocket):
+    """
+    Real-time dashboard event feed over WebSocket.
+
+    Authenticated via the same JWT cookie used by the admin UI.
+    Broadcasts: request_new, request_analysis, canary_hit, trap_hit.
+    """
+    from routers.admin import verify_token
+    from services.ws_feed import get_ws_manager
+
+    # Authenticate — must have a valid admin JWT cookie
+    token = websocket.cookies.get("access_token")
+    if not token or not verify_token(token):
+        await websocket.close(code=4401)
+        return
+
+    manager = get_ws_manager()
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep the connection alive; clients send pings, we discard them
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        manager.disconnect(websocket)
 
 
 @app.get("/playground")
