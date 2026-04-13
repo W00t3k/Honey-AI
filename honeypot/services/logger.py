@@ -473,6 +473,7 @@ class RequestLogger:
         try:
             analyzer = await self._get_analyzer()
             if not analyzer.enabled:
+                console.print(f"[dim yellow]Groq Interpretation #{request_id}: unavailable (analyzer disabled)[/dim yellow]")
                 return
 
             analysis = await analyzer.analyze(request_data)
@@ -487,10 +488,13 @@ class RequestLogger:
                     ai_recommendations=analysis.recommendations,
                     ai_iocs=analysis.iocs,
                     ai_confidence=analysis.confidence,
+                    ai_actor_type=getattr(analysis, "actor_type", "unknown"),
                 )
 
                 # Print analysis to console
                 self._print_analysis(request_id, analysis)
+            else:
+                console.print(f"[dim yellow]Groq Interpretation #{request_id}: unavailable (no result returned)[/dim yellow]")
 
         except Exception as e:
             console.print(f"[red]Analysis error for #{request_id}: {e}[/red]")
@@ -750,6 +754,15 @@ class RequestLogger:
             f"[bold {color}]{classification.classification.upper()}[/bold {color}] "
             f"({classification.confidence:.0%} confidence)",
         )
+        if classification.classification == "human":
+            verdict = "[bold green]HUMAN[/bold green]"
+        elif classification.classification in ("scanner", "credential_stuffer", "prompt_harvester", "data_exfil", "recon"):
+            verdict = "[bold red]NOT HUMAN[/bold red]"
+        elif classification.classification == "researcher":
+            verdict = "[bold blue]RESEARCHER / MANUAL[/bold blue]"
+        else:
+            verdict = "[bold yellow]UNCERTAIN[/bold yellow]"
+        table.add_row("Human / Not", verdict)
         if data.get("framework"):
             table.add_row("Framework", f"[bold cyan]{data['framework']}[/bold cyan]")
         if data.get("attack_chain_id"):
@@ -778,6 +791,20 @@ class RequestLogger:
             if trap_hit:
                 agent_parts.append(f"[bold red]⚡ TRAP HIT ({trap_type})[/bold red]")
             table.add_row("Agent Signal", " | ".join(agent_parts) if agent_parts else "—")
+
+        observables = [f"ip:{data['source_ip']}"]
+        ua = str(data.get("user_agent") or "").strip()
+        if ua:
+            observables.append(f"ua:{self._truncate(ua, 60)}")
+        if data.get("api_key"):
+            observables.append(f"key:{data['api_key'][:12]}...")
+        if data.get("model_requested"):
+            observables.append(f"model:{data['model_requested']}")
+        if data.get("path"):
+            observables.append(f"path:{data['path']}")
+        if data.get("realtime_session_id"):
+            observables.append(f"rt_session:{data['realtime_session_id']}")
+        table.add_row("Observables", "\n".join(f"[dim]• {item}[/dim]" for item in observables[:6]))
 
         console.print(table)
 
@@ -928,8 +955,18 @@ class RequestLogger:
         }
         color = level_colors.get(analysis.threat_level, "white")
 
+        actor_map = {
+            "human": "[bold green]HUMAN[/bold green]",
+            "bot": "[bold yellow]BOT[/bold yellow]",
+            "llm_agent": "[bold red]LLM AGENT[/bold red]",
+            "researcher": "[bold blue]RESEARCHER[/bold blue]",
+            "unknown": "[bold white]UNKNOWN[/bold white]",
+        }
+        actor_label = actor_map.get(getattr(analysis, "actor_type", "unknown"), "[bold white]UNKNOWN[/bold white]")
+
         panel_content = f"""[{color}]Threat Level: {analysis.threat_level.upper()}[/{color}]
 Type: {analysis.threat_type}
+Groq Actor Verdict: {actor_label}
 Confidence: {analysis.confidence:.0%}
 
 {analysis.summary}
@@ -943,12 +980,14 @@ Confidence: {analysis.confidence:.0%}
 
         if analysis.iocs:
             panel_content += "\n\n[bold]IOCs:[/bold]"
-            for ioc in analysis.iocs[:3]:
+            for ioc in analysis.iocs[:6]:
                 panel_content += f"\n  • {ioc}"
+        else:
+            panel_content += "\n\n[bold]IOCs:[/bold]\n  • none extracted by Groq"
 
         console.print(Panel(
             panel_content,
-            title=f"[bold]AI Analysis #{request_id}[/bold]",
+            title=f"[bold]Groq Interpretation #{request_id}[/bold]",
             border_style=color,
         ))
         console.print()

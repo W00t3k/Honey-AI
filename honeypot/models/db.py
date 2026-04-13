@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -74,6 +74,10 @@ SCHEMA_MIGRATIONS = {
         ("realtime_session_id", "VARCHAR(64)"),
         ("voice_profile", "VARCHAR(50)"),
         ("voice_metadata", "JSON"),
+    ],
+    6: [
+        # Groq LLM actor classification: human | bot | llm_agent | researcher | unknown
+        ("ai_actor_type", "VARCHAR(20)"),
     ],
 }
 
@@ -163,6 +167,8 @@ class Request(Base):
     ai_iocs = Column(JSON, nullable=True)
     ai_confidence = Column(Float, nullable=True)
     ai_analyzed_at = Column(DateTime, nullable=True)
+    # Groq actor verdict: human | bot | llm_agent | researcher | unknown
+    ai_actor_type = Column(String(20), nullable=True, index=True)
 
     __table_args__ = (
         Index('idx_timestamp_ip', 'timestamp', 'source_ip'),
@@ -227,6 +233,7 @@ class Request(Base):
             "ai_iocs": self.ai_iocs,
             "ai_confidence": self.ai_confidence,
             "ai_analyzed_at": self.ai_analyzed_at.isoformat() if self.ai_analyzed_at else None,
+            "ai_actor_type": self.ai_actor_type,
         }
 
 
@@ -470,6 +477,7 @@ class Database:
         ai_recommendations: list,
         ai_iocs: list,
         ai_confidence: float,
+        ai_actor_type: str = "unknown",
     ):
         """Update a request with AI analysis results."""
         async with self.async_session() as session:
@@ -485,6 +493,7 @@ class Database:
                 request.ai_recommendations = ai_recommendations
                 request.ai_iocs = ai_iocs
                 request.ai_confidence = ai_confidence
+                request.ai_actor_type = ai_actor_type
                 request.ai_analyzed_at = datetime.utcnow()
                 await session.commit()
 
@@ -591,6 +600,15 @@ class Database:
                 for r in recent_agents.all()
             ]
 
+            # Groq actor type breakdown
+            actor_types = await session.execute(
+                select(Request.ai_actor_type, func.count(Request.id).label('count'))
+                .where(Request.ai_actor_type.isnot(None))
+                .group_by(Request.ai_actor_type)
+                .order_by(func.count(Request.id).desc())
+            )
+            actor_type_breakdown = {r[0]: r[1] for r in actor_types.all()}
+
             replay_chains = await session.execute(
                 select(
                     Request.attack_chain_id,
@@ -622,6 +640,7 @@ class Database:
                 "trap_type_breakdown": trap_type_breakdown,
                 "detected_agents": detected_agents,
                 "recent_attack_chains": recent_chains,
+                "actor_type_breakdown": actor_type_breakdown,
             }
 
     async def get_attack_chain(self, attack_chain_id: str, limit: int = 200) -> list[dict]:

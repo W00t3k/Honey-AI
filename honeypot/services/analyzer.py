@@ -28,6 +28,7 @@ class ThreatAnalysis:
     threat_type: str  # e.g., "credential_testing", "reconnaissance", "prompt_injection"
     summary: str  # One-line summary
     details: str  # Detailed analysis
+    actor_type: str = "unknown"  # human | bot | llm_agent | researcher | unknown
     recommendations: list[str] = field(default_factory=list)
     iocs: list[str] = field(default_factory=list)  # Indicators of compromise
     confidence: float = 0.0
@@ -68,6 +69,7 @@ Respond ONLY in this exact JSON format (no extra text):
 {{
     "threat_level": "low|medium|high|critical",
     "threat_type": "reconnaissance|credential_testing|prompt_injection|data_exfiltration|automated_scanner|manual_probe|api_abuse|jailbreak|mcp_probe|mcp_tool_injection|rag_poisoning|agentic_abuse|unknown",
+    "actor_type": "human|bot|llm_agent|researcher|unknown",
     "summary": "One concise sentence describing what this attacker is doing",
     "details": "2-4 sentences: what TTPs are evident, what goal the attacker likely has, and any noteworthy patterns in the payload",
     "recommendations": ["Specific action 1", "Specific action 2", "Specific action 3"],
@@ -220,6 +222,7 @@ class GroqAnalyzer:
             return ThreatAnalysis(
                 threat_level=analysis_data.get("threat_level", "unknown"),
                 threat_type=analysis_data.get("threat_type", "unknown"),
+                actor_type=analysis_data.get("actor_type", "unknown"),
                 summary=analysis_data.get("summary", "Analysis unavailable"),
                 details=analysis_data.get("details", ""),
                 recommendations=analysis_data.get("recommendations", []),
@@ -231,6 +234,7 @@ class GroqAnalyzer:
             return ThreatAnalysis(
                 threat_level="unknown",
                 threat_type="unknown",
+                actor_type="unknown",
                 summary="Analysis parsing failed",
                 details=content[:500],
                 confidence=0.0,

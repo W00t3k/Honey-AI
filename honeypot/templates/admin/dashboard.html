@@ -282,6 +282,12 @@
         .badge.researcher { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
         .badge.human { background: rgba(74, 222, 128, 0.2); color: var(--success); }
         .badge.unknown { background: rgba(100, 100, 150, 0.2); color: var(--text-secondary); }
+        /* Actor type badges */
+        .badge.actor-human { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.4); }
+        .badge.actor-bot { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.4); }
+        .badge.actor-llm_agent { background: rgba(233, 69, 96, 0.2); color: #e94560; border: 1px solid rgba(233,69,96,0.5); }
+        .badge.actor-researcher { background: rgba(96, 165, 250, 0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.4); }
+        .badge.actor-unknown { background: rgba(100, 100, 150, 0.15); color: #888; border: 1px solid rgba(100,100,150,0.3); }
         /* Protocol source badges */
         .badge.proto-openai_api { background: rgba(96,165,250,0.1); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); font-size: 10px; }
         .badge.proto-anthropic_api { background: rgba(192,132,252,0.1); color: #c084fc; border: 1px solid rgba(192,132,252,0.3); font-size: 10px; }
@@ -444,6 +450,83 @@
             font-weight: 600;
             color: white;
         }
+
+        .ai-iocs {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .ai-iocs h4 {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .ioc-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .ioc-pill {
+            font-family: monospace;
+            font-size: 11px;
+            padding: 2px 8px;
+            background: rgba(233, 69, 96, 0.1);
+            border: 1px solid rgba(233, 69, 96, 0.3);
+            border-radius: 4px;
+            color: #f87171;
+        }
+
+        .observables-grid {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+        }
+
+        .obs-item {
+            font-size: 11px;
+            font-family: monospace;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .obs-item span {
+            color: var(--text-primary);
+        }
+
+        .agent-signal-row {
+            margin-top: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .agent-signal-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .trap-hit-banner {
+            margin-top: 8px;
+            padding: 6px 10px;
+            background: rgba(233, 69, 96, 0.15);
+            border: 1px solid rgba(233, 69, 96, 0.5);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #e94560;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -523,7 +606,7 @@
                     </div>
                     <div class="request-feed" id="request-feed">
                         {% for req in recent_requests %}
-                        <div class="request-item" data-id="{{ req.id }}" onclick="toggleAnalysis(this, {{ req | tojson | safe }})">
+                        <div class="request-item" data-id="{{ req.id }}" onclick="toggleAnalysis(this)">
                             <div class="request-header">
                                 <div>
                                     <span class="request-id">#{{ req.id }}</span>
@@ -537,15 +620,24 @@
                                 {% if req.country_name %}<span>{{ req.country_name }}</span>{% endif %}
                                 {% if req.protocol %}<span class="badge proto-{{ req.protocol }}">{{ req.protocol }}</span>{% endif %}
                                 {% if req.classification %}<span class="badge {{ req.classification }}">{{ req.classification }}</span>{% endif %}
-                                {% if req.has_tool_calls %}<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border-color:#4ade80;">tool_calls</span>{% endif %}
-                                {% if req.is_flagged %}<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border-color:#fbbf24;">🎯 canary</span>{% endif %}
+                                {% if req.ai_actor_type and req.ai_actor_type != 'unknown' %}<span class="badge actor-{{ req.ai_actor_type }}">🤖 {{ req.ai_actor_type }}</span>{% endif %}
+                                {% if req.agent_type == 'llm_agent' %}<span class="badge actor-llm_agent">🤖 LLM Agent</span>{% endif %}
+                                {% if req.trap_hit %}<span class="badge" style="background:rgba(233,69,96,0.2);color:#e94560;border:1px solid #e94560;">⚡ trap hit</span>{% endif %}
+                                {% if req.has_tool_calls %}<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid #4ade80;">tool_calls</span>{% endif %}
+                                {% if req.is_flagged %}<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24;">🎯 canary</span>{% endif %}
+                                {% if req.framework %}<span class="badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4);">{{ req.framework }}</span>{% endif %}
                                 {% if req.threat_level %}<span class="threat-badge {{ req.threat_level }}">{{ req.threat_level }}</span>{% endif %}
                             </div>
                             <div class="ai-analysis" id="analysis-{{ req.id }}">
+                                {% if req.trap_hit %}
+                                <div class="trap-hit-banner">⚡ TRAP HIT — {{ req.trap_type or 'unknown' }} trap triggered{% if req.response_delta_ms %} · {{ req.response_delta_ms|int }}ms response delta{% endif %}</div>
+                                {% endif %}
                                 {% if req.ai_summary %}
                                 <div class="ai-analysis-header">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                                    AI Analysis
+                                    Groq AI Analysis
+                                    {% if req.ai_actor_type %}<span class="badge actor-{{ req.ai_actor_type }}" style="font-size:10px;">{{ req.ai_actor_type }}</span>{% endif %}
+                                    {% if req.ai_confidence %}<span style="color:var(--text-secondary);font-size:11px;">{{ (req.ai_confidence * 100)|int }}% confidence</span>{% endif %}
                                 </div>
                                 <div class="ai-summary">{{ req.ai_summary }}</div>
                                 {% if req.ai_details %}<div class="ai-details">{{ req.ai_details }}</div>{% endif %}
@@ -559,6 +651,16 @@
                                     </ul>
                                 </div>
                                 {% endif %}
+                                {% if req.ai_iocs %}
+                                <div class="ai-iocs">
+                                    <h4>IOCs</h4>
+                                    <div class="ioc-list">
+                                    {% for ioc in req.ai_iocs %}
+                                        <span class="ioc-pill">{{ ioc }}</span>
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
                                 {% else %}
                                 <div class="ai-analysis-header">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
@@ -566,6 +668,16 @@
                                 </div>
                                 <div class="ai-summary" style="color: var(--text-secondary);">Analysis pending or not available...</div>
                                 {% endif %}
+                                <div class="observables-grid">
+                                    <div class="obs-item">ip: <span>{{ req.source_ip }}</span></div>
+                                    {% if req.model_requested %}<div class="obs-item">model: <span>{{ req.model_requested }}</span></div>{% endif %}
+                                    {% if req.api_key %}<div class="obs-item">key: <span>{{ req.api_key[:14] }}...</span></div>{% endif %}
+                                    {% if req.framework %}<div class="obs-item">framework: <span>{{ req.framework }}</span></div>{% endif %}
+                                    {% if req.attack_stage %}<div class="obs-item">stage: <span>{{ req.attack_stage }}</span></div>{% endif %}
+                                    {% if req.asn_org %}<div class="obs-item">asn: <span>{{ req.asn_org[:30] }}</span></div>{% endif %}
+                                    {% if req.response_delta_ms %}<div class="obs-item">delta: <span>{{ req.response_delta_ms|int }}ms</span></div>{% endif %}
+                                    {% if req.user_agent %}<div class="obs-item" style="grid-column: 1/-1;">ua: <span>{{ req.user_agent[:80] }}</span></div>{% endif %}
+                                </div>
                             </div>
                         </div>
                         {% endfor %}
@@ -583,6 +695,22 @@
                             {% for level, count in stats.get('threat_levels', {}).items() %}
                             <li class="classification-item">
                                 <span class="threat-badge {{ level }}">{{ level }}</span>
+                                <span>{{ count }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2>Actor Types (Groq)</h2>
+                    </div>
+                    <div class="panel-body">
+                        <ul class="classification-list" id="actor-type-list">
+                            {% for actor, count in stats.get('actor_type_breakdown', {}).items() %}
+                            <li class="classification-item">
+                                <span class="badge actor-{{ actor }}">{{ actor }}</span>
                                 <span>{{ count }}</span>
                             </li>
                             {% endfor %}
@@ -712,7 +840,7 @@
             }
         }
 
-        function toggleAnalysis(element, reqData) {
+        function toggleAnalysis(element) {
             const analysisDiv = element.querySelector('.ai-analysis');
             const isVisible = analysisDiv.classList.contains('visible');
 
@@ -726,6 +854,89 @@
                 analysisDiv.classList.add('visible');
                 element.classList.add('expanded');
             }
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function renderActorBadge(actorType) {
+            if (!actorType || actorType === 'unknown') return '';
+            const icons = { human: '👤', bot: '🤖', llm_agent: '🤖', researcher: '🔍' };
+            return `<span class="badge actor-${esc(actorType)}">${icons[actorType] || '🤖'} ${esc(actorType)}</span>`;
+        }
+
+        function renderRequestItem(req) {
+            const iocs = (req.ai_iocs && req.ai_iocs.length)
+                ? `<div class="ai-iocs"><h4>IOCs</h4><div class="ioc-list">${req.ai_iocs.map(i => `<span class="ioc-pill">${esc(i)}</span>`).join('')}</div></div>`
+                : '';
+
+            const recommendations = (req.ai_recommendations && req.ai_recommendations.length)
+                ? `<div class="ai-recommendations"><h4>Recommendations</h4><ul>${req.ai_recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div>`
+                : '';
+
+            const trapBanner = req.trap_hit
+                ? `<div class="trap-hit-banner">⚡ TRAP HIT — ${esc(req.trap_type || 'unknown')} trap triggered${req.response_delta_ms ? ` · ${Math.round(req.response_delta_ms)}ms delta` : ''}</div>`
+                : '';
+
+            const analysisBody = req.ai_summary
+                ? `<div class="ai-analysis-header">
+                       <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                       Groq AI Analysis
+                       ${req.ai_actor_type ? renderActorBadge(req.ai_actor_type) : ''}
+                       ${req.ai_confidence ? `<span style="color:var(--text-secondary);font-size:11px;">${Math.round(req.ai_confidence * 100)}% confidence</span>` : ''}
+                   </div>
+                   <div class="ai-summary">${esc(req.ai_summary)}</div>
+                   ${req.ai_details ? `<div class="ai-details">${esc(req.ai_details)}</div>` : ''}
+                   ${recommendations}
+                   ${iocs}`
+                : `<div class="ai-analysis-header">
+                       <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                       AI Analysis
+                   </div>
+                   <div class="ai-summary" style="color: var(--text-secondary);">Analysis pending...</div>`;
+
+            const observables = [
+                `<div class="obs-item">ip: <span>${esc(req.source_ip)}</span></div>`,
+                req.model_requested ? `<div class="obs-item">model: <span>${esc(req.model_requested)}</span></div>` : '',
+                req.api_key ? `<div class="obs-item">key: <span>${esc(req.api_key.slice(0,14))}…</span></div>` : '',
+                req.framework ? `<div class="obs-item">framework: <span>${esc(req.framework)}</span></div>` : '',
+                req.attack_stage ? `<div class="obs-item">stage: <span>${esc(req.attack_stage)}</span></div>` : '',
+                req.asn_org ? `<div class="obs-item">asn: <span>${esc(req.asn_org.slice(0,30))}</span></div>` : '',
+                req.response_delta_ms ? `<div class="obs-item">delta: <span>${Math.round(req.response_delta_ms)}ms</span></div>` : '',
+                req.user_agent ? `<div class="obs-item" style="grid-column:1/-1">ua: <span>${esc(req.user_agent.slice(0,80))}</span></div>` : '',
+            ].filter(Boolean).join('');
+
+            return `
+                <div class="request-item" data-id="${req.id}" onclick="toggleAnalysis(this)">
+                    <div class="request-header">
+                        <div>
+                            <span class="request-id">#${req.id}</span>
+                            <span class="request-method ${esc(req.method)}">${esc(req.method)}</span>
+                        </div>
+                        <span class="request-time">${esc(req.timestamp)}</span>
+                    </div>
+                    <div class="request-path">${esc(req.path)}</div>
+                    <div class="request-meta">
+                        <span class="request-ip">${esc(req.source_ip)}</span>
+                        ${req.country_name ? `<span>${esc(req.country_name)}</span>` : ''}
+                        ${req.protocol ? `<span class="badge proto-${esc(req.protocol)}">${esc(req.protocol)}</span>` : ''}
+                        ${req.classification ? `<span class="badge ${esc(req.classification)}">${esc(req.classification)}</span>` : ''}
+                        ${req.ai_actor_type && req.ai_actor_type !== 'unknown' ? renderActorBadge(req.ai_actor_type) : ''}
+                        ${req.agent_type === 'llm_agent' ? `<span class="badge actor-llm_agent">🤖 LLM Agent</span>` : ''}
+                        ${req.trap_hit ? `<span class="badge" style="background:rgba(233,69,96,0.2);color:#e94560;border:1px solid #e94560;">⚡ trap hit</span>` : ''}
+                        ${req.has_tool_calls ? `<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid #4ade80">tool_calls</span>` : ''}
+                        ${req.is_flagged ? `<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24">🎯 canary</span>` : ''}
+                        ${req.framework ? `<span class="badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4)">${esc(req.framework)}</span>` : ''}
+                        ${req.threat_level ? `<span class="threat-badge ${esc(req.threat_level)}">${esc(req.threat_level)}</span>` : ''}
+                    </div>
+                    <div class="ai-analysis" id="analysis-${req.id}">
+                        ${trapBanner}
+                        ${analysisBody}
+                        <div class="observables-grid">${observables}</div>
+                    </div>
+                </div>`;
         }
 
         async function refreshData() {
@@ -745,6 +956,19 @@
                 const canaryCount = (await fetch(ADMIN_PATH + '/api/requests?limit=500').then(r => r.json()).catch(() => [])).filter(r => r.is_flagged).length;
                 document.getElementById('canary-reuses').textContent = canaryCount;
 
+                // Actor type breakdown panel
+                const actorList = document.getElementById('actor-type-list');
+                if (actorList && stats.actor_type_breakdown) {
+                    const actorIcons = { human: '👤', bot: '🤖', llm_agent: '🤖', researcher: '🔍', unknown: '❓' };
+                    actorList.innerHTML = Object.entries(stats.actor_type_breakdown)
+                        .sort((a,b) => b[1]-a[1])
+                        .map(([actor, count]) => `
+                            <li class="classification-item">
+                                <span class="badge actor-${actor}">${actorIcons[actor] || '🤖'} ${actor}</span>
+                                <span>${count}</span>
+                            </li>`).join('');
+                }
+
                 // Protocol breakdown panel
                 const protoList = document.getElementById('protocol-list');
                 if (protoList && stats.protocol_breakdown) {
@@ -762,43 +986,7 @@
                 const requests = await requestsResponse.json();
 
                 const feed = document.getElementById('request-feed');
-                feed.innerHTML = requests.map(req => `
-                    <div class="request-item" data-id="${req.id}" onclick="toggleAnalysis(this, ${JSON.stringify(req).replace(/"/g, '&quot;')})">
-                        <div class="request-header">
-                            <div>
-                                <span class="request-id">#${req.id}</span>
-                                <span class="request-method ${req.method}">${req.method}</span>
-                            </div>
-                            <span class="request-time">${req.timestamp}</span>
-                        </div>
-                        <div class="request-path">${req.path}</div>
-                        <div class="request-meta">
-                            <span class="request-ip">${req.source_ip}</span>
-                            ${req.country_name ? `<span>${req.country_name}</span>` : ''}
-                            ${req.protocol ? `<span class="badge proto-${req.protocol}">${req.protocol}</span>` : ''}
-                            ${req.classification ? `<span class="badge ${req.classification}">${req.classification}</span>` : ''}
-                            ${req.has_tool_calls ? `<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid #4ade80">tool_calls</span>` : ''}
-                            ${req.is_flagged ? `<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24">🎯 canary</span>` : ''}
-                            ${req.threat_level ? `<span class="threat-badge ${req.threat_level}">${req.threat_level}</span>` : ''}
-                        </div>
-                        <div class="ai-analysis" id="analysis-${req.id}">
-                            <div class="ai-analysis-header">
-                                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                                AI Analysis
-                            </div>
-                            ${req.ai_summary ? `
-                                <div class="ai-summary">${req.ai_summary}</div>
-                                ${req.ai_details ? `<div class="ai-details">${req.ai_details}</div>` : ''}
-                                ${req.ai_recommendations && req.ai_recommendations.length ? `
-                                    <div class="ai-recommendations">
-                                        <h4>Recommendations</h4>
-                                        <ul>${req.ai_recommendations.map(r => `<li>${r}</li>`).join('')}</ul>
-                                    </div>
-                                ` : ''}
-                            ` : '<div class="ai-summary" style="color: var(--text-secondary);">Analysis pending...</div>'}
-                        </div>
-                    </div>
-                `).join('');
+                feed.innerHTML = requests.map(req => renderRequestItem(req)).join('');
             } catch (error) {
                 console.error('Failed to refresh data:', error);
             }
