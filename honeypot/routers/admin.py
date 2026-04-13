@@ -37,10 +37,9 @@ def _country_flag(country_code: str) -> str:
 templates.env.filters["country_flag"] = _country_flag
 
 # Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
 # JWT settings
-SECRET_KEY = os.getenv("JWT_SECRET", "change-this-secret-key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
@@ -67,14 +66,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     else:
         expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, _get_jwt_secret(), algorithm=ALGORITHM)
     return encoded_jwt
 
 
 def verify_token(token: str) -> Optional[str]:
     """Verify JWT token and return username."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, _get_jwt_secret(), algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
             return None
@@ -136,6 +135,11 @@ def _check_credentials(username: str, password: str) -> bool:
         return password == stored_hash  # plaintext fallback
     else:
         return username == _ENV_ADMIN_USERNAME and password == _ENV_ADMIN_PASSWORD
+
+
+def _get_jwt_secret() -> str:
+    """Use saved config first so settings changes take effect immediately."""
+    return get_config().get("jwt_secret") or os.getenv("JWT_SECRET", "change-this-secret-key")
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -210,6 +214,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
             value=access_token,
             httponly=True,
             max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
+            path=ADMIN_PATH,
+            secure=request.url.scheme == "https",
             samesite="lax",
         )
         return response
@@ -222,10 +228,10 @@ async def login(request: Request, username: str = Form(...), password: str = For
 
 
 @router.get("/logout")
-async def logout():
+async def logout(request: Request):
     """Handle logout."""
     response = RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
-    response.delete_cookie(key="access_token")
+    response.delete_cookie(key="access_token", path=ADMIN_PATH, secure=request.url.scheme == "https")
     return response
 
 
@@ -328,6 +334,35 @@ async def api_stats(request: Request):
     threat_stats = await db.get_threat_stats()
     stats.update(threat_stats)
     return stats
+
+
+@router.get("/api/agents")
+async def api_agents(request: Request):
+    """Detected LLM agents feed."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    db = get_database()
+    threat_stats = await db.get_threat_stats()
+    return {
+        "agent_types": threat_stats.get("agent_types", {}),
+        "trap_hits": threat_stats.get("trap_hits", 0),
+        "trap_type_breakdown": threat_stats.get("trap_type_breakdown", {}),
+        "detected_agents": threat_stats.get("detected_agents", []),
+        "recent_attack_chains": threat_stats.get("recent_attack_chains", []),
+    }
+
+
+@router.get("/api/chains/{attack_chain_id}")
+async def api_attack_chain(request: Request, attack_chain_id: str):
+    """Replay a correlated attack chain."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    db = get_database()
+    return await db.get_attack_chain(attack_chain_id)
 
 
 @router.get("/api/requests")
@@ -484,12 +519,14 @@ async def save_settings(request: Request):
         config.update(**data)
 
         # Reinitialize services that depend on config
-        if data.get("groq_api_key"):
-            from services.analyzer import get_analyzer
-            analyzer = get_analyzer()
-            analyzer.api_key = data["groq_api_key"]
-            analyzer.model = data.get("groq_model", "llama-3.1-8b-instant")
-            analyzer.enabled = bool(data["groq_api_key"]) and data.get("groq_enabled", True)
+        from services.analyzer import get_analyzer
+        from services.groq_chat import get_groq_chat
+        analyzer = get_analyzer()
+        analyzer.reload_from_config()
+        get_groq_chat().reload_from_config()
+
+        from services.alerts import get_alert_service
+        get_alert_service().reload_from_config()
 
         return {"status": "ok", "message": "Settings saved"}
     except Exception as e:

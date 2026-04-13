@@ -221,7 +221,7 @@
                     <p class="form-hint">Free at <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a></p>
                     <div class="test-result" id="groq-test-result"></div>
                 </div>
-                <div class="form-row">
+                <div class="form-row-3">
                     <div class="form-group">
                         <label><strong>Model</strong></label>
                         <select class="form-control" id="groq_model">
@@ -229,6 +229,16 @@
                             <option value="llama-3.1-70b-versatile" {{ 'selected' if config.groq_model == 'llama-3.1-70b-versatile' }}>Llama 3.1 70B (Better)</option>
                             <option value="mixtral-8x7b-32768" {{ 'selected' if config.groq_model == 'mixtral-8x7b-32768' }}>Mixtral 8x7B</option>
                         </select>
+                        <p class="form-hint">Used for threat analysis.</p>
+                    </div>
+                    <div class="form-group">
+                        <label><strong>Public Chat Model</strong></label>
+                        <select class="form-control" id="groq_chat_model">
+                            <option value="llama-3.3-70b-versatile" {{ 'selected' if config.groq_chat_model == 'llama-3.3-70b-versatile' }}>Llama 3.3 70B</option>
+                            <option value="llama-3.1-8b-instant" {{ 'selected' if config.groq_chat_model == 'llama-3.1-8b-instant' }}>Llama 3.1 8B</option>
+                            <option value="llama-3.1-70b-versatile" {{ 'selected' if config.groq_chat_model == 'llama-3.1-70b-versatile' }}>Llama 3.1 70B</option>
+                        </select>
+                        <p class="form-hint">Used for the public web chat lure.</p>
                     </div>
                     <div class="form-group">
                         <label><strong>Enable AI Analysis</strong></label>
@@ -391,7 +401,7 @@
                 </p>
                 <div class="tag-list" id="canary-list">
                     {% for token in config.canary_tokens %}
-                    <span class="tag">{{ token[:20] }}...<span class="remove" onclick="removeCanary('{{ token }}')">×</span></span>
+                    <span class="tag">{{ token.label }}: {{ token.token[:18] }}...<span class="remove" onclick="removeCanary('{{ token.id }}')">×</span></span>
                     {% endfor %}
                 </div>
                 <div class="input-group" style="margin-top: 15px;">
@@ -517,6 +527,7 @@
     <div class="toast" id="toast">Settings saved!</div>
 
     <script>
+        const ADMIN_PATH = '{{ admin_path }}';
         let additionalPorts = {{ config.additional_ports | tojson }};
         let canaryTokens = {{ config.canary_tokens | tojson }};
 
@@ -556,21 +567,27 @@
         function addCanary() {
             const input = document.getElementById('new-canary');
             const token = input.value.trim();
-            if (token && !canaryTokens.includes(token)) {
-                canaryTokens.push(token);
+            if (token && !canaryTokens.some(t => t.token === token)) {
+                canaryTokens.push({
+                    id: crypto.randomUUID().slice(0, 8),
+                    label: 'Manual Canary',
+                    token,
+                    note: 'added in settings',
+                    added_at: new Date().toISOString(),
+                });
                 renderCanaries();
                 input.value = '';
             }
         }
 
-        function removeCanary(token) {
-            canaryTokens = canaryTokens.filter(t => t !== token);
+        function removeCanary(tokenId) {
+            canaryTokens = canaryTokens.filter(t => t.id !== tokenId);
             renderCanaries();
         }
 
         function renderCanaries() {
             document.getElementById('canary-list').innerHTML = canaryTokens.map(token =>
-                `<span class="tag">${token.substring(0, 20)}...<span class="remove" onclick="removeCanary('${token}')">×</span></span>`
+                `<span class="tag">${token.label}: ${token.token.substring(0, 18)}...<span class="remove" onclick="removeCanary('${token.id}')">×</span></span>`
             ).join('');
         }
 
@@ -587,7 +604,7 @@
             result.textContent = 'Testing...';
 
             try {
-                const response = await fetch('/admin/api/test-groq', {
+                const response = await fetch(ADMIN_PATH + '/api/test-groq', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ api_key: key })
@@ -617,7 +634,7 @@
             result.textContent = 'Sending test...';
 
             try {
-                const response = await fetch('/admin/api/test-webhook', {
+                const response = await fetch(ADMIN_PATH + '/api/test-webhook', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ type, url })
@@ -646,7 +663,7 @@
             result.textContent = 'Downloading GeoLite2 database...';
 
             try {
-                const response = await fetch('/admin/api/download-geoip', {
+                const response = await fetch(ADMIN_PATH + '/api/download-geoip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ license_key: key })
@@ -664,6 +681,7 @@
             const config = {
                 groq_api_key: document.getElementById('groq_api_key').value,
                 groq_model: document.getElementById('groq_model').value,
+                groq_chat_model: document.getElementById('groq_chat_model').value,
                 groq_enabled: document.getElementById('groq_enabled').checked,
                 slack_webhook_url: document.getElementById('slack_webhook_url').value,
                 discord_webhook_url: document.getElementById('discord_webhook_url').value,
@@ -693,7 +711,7 @@
             };
 
             try {
-                const response = await fetch('/admin/api/settings', {
+                const response = await fetch(ADMIN_PATH + '/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)

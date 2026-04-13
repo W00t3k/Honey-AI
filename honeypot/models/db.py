@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -53,6 +53,27 @@ SCHEMA_MIGRATIONS = {
         ("protocol", "VARCHAR(20)"),
         # Whether the request contained tool_calls (agentic signal)
         ("has_tool_calls", "BOOLEAN"),
+    ],
+    4: [
+        # LLM Agent detection (Palisade Research technique)
+        # Values: bot | llm_agent | human | unknown
+        ("agent_type", "VARCHAR(20)"),
+        # True if this request complied with a planted deception trap
+        ("trap_hit", "BOOLEAN"),
+        # Which trap type fired: trigger_token | goal_hijack | redirect | mcp_never_call
+        ("trap_type", "VARCHAR(30)"),
+        # Milliseconds between our last response and this request (timing signal)
+        ("response_delta_ms", "FLOAT"),
+    ],
+    5: [
+        ("framework", "VARCHAR(50)"),
+        ("attack_chain_id", "VARCHAR(64)"),
+        ("attack_stage", "VARCHAR(30)"),
+        ("owasp_categories", "JSON"),
+        ("mitre_atlas_tags", "JSON"),
+        ("realtime_session_id", "VARCHAR(64)"),
+        ("voice_profile", "VARCHAR(50)"),
+        ("voice_metadata", "JSON"),
     ],
 }
 
@@ -111,6 +132,24 @@ class Request(Base):
     # True if the request body contained tool_calls (agentic loop signal)
     has_tool_calls = Column(Boolean, nullable=True, index=True)
 
+    # LLM Agent detection (Palisade Research / trap-compliance technique)
+    # bot | llm_agent | human | unknown
+    agent_type = Column(String(20), nullable=True, index=True)
+    # True if this request triggered/complied with a planted deception trap
+    trap_hit = Column(Boolean, nullable=True, index=True)
+    # trigger_token | goal_hijack | redirect | mcp_never_call
+    trap_type = Column(String(30), nullable=True)
+    # ms between our last response to this IP and this incoming request
+    response_delta_ms = Column(Float, nullable=True)
+    framework = Column(String(50), nullable=True, index=True)
+    attack_chain_id = Column(String(64), nullable=True, index=True)
+    attack_stage = Column(String(30), nullable=True, index=True)
+    owasp_categories = Column(JSON, nullable=True)
+    mitre_atlas_tags = Column(JSON, nullable=True)
+    realtime_session_id = Column(String(64), nullable=True, index=True)
+    voice_profile = Column(String(50), nullable=True)
+    voice_metadata = Column(JSON, nullable=True)
+
     # Metadata
     is_flagged = Column(Boolean, default=False, index=True)
     notes = Column(Text, nullable=True)
@@ -166,6 +205,18 @@ class Request(Base):
             "classification_reasons": self.classification_reasons,
             "protocol": self.protocol,
             "has_tool_calls": self.has_tool_calls,
+            "agent_type": self.agent_type,
+            "trap_hit": self.trap_hit,
+            "trap_type": self.trap_type,
+            "response_delta_ms": self.response_delta_ms,
+            "framework": self.framework,
+            "attack_chain_id": self.attack_chain_id,
+            "attack_stage": self.attack_stage,
+            "owasp_categories": self.owasp_categories,
+            "mitre_atlas_tags": self.mitre_atlas_tags,
+            "realtime_session_id": self.realtime_session_id,
+            "voice_profile": self.voice_profile,
+            "voice_metadata": self.voice_metadata,
             "is_flagged": self.is_flagged,
             "notes": self.notes,
             "threat_level": self.threat_level,
@@ -353,6 +404,14 @@ class Database:
             )
             agentic_count = agentic_count_result.scalar() or 0
 
+            frameworks = await session.execute(
+                select(Request.framework, func.count(Request.id).label('count'))
+                .where(Request.framework.isnot(None))
+                .group_by(Request.framework)
+                .order_by(func.count(Request.id).desc())
+            )
+            framework_breakdown = {r[0]: r[1] for r in frameworks.all()}
+
             return {
                 "total_requests": total_count,
                 "unique_ips": unique_ip_count,
@@ -360,6 +419,7 @@ class Database:
                 "top_countries": top_countries,
                 "classification_breakdown": classification_breakdown,
                 "protocol_breakdown": protocol_breakdown,
+                "framework_breakdown": framework_breakdown,
                 "agentic_requests": agentic_count,
                 "top_paths": top_paths,
                 "top_asn_orgs": top_asn_orgs,
@@ -481,11 +541,99 @@ class Database:
                 .where(Request.threat_level.in_(['high', 'critical']))
             )
 
+            # LLM Agent detection stats
+            agent_types = await session.execute(
+                select(Request.agent_type, func.count(Request.id).label('count'))
+                .where(Request.agent_type.isnot(None))
+                .group_by(Request.agent_type)
+                .order_by(func.count(Request.id).desc())
+            )
+            agent_breakdown = {r[0]: r[1] for r in agent_types.all()}
+
+            # Trap hits
+            trap_hits = await session.execute(
+                select(func.count(Request.id))
+                .where(Request.trap_hit == True)  # noqa: E712
+            )
+
+            # Trap type breakdown
+            trap_types = await session.execute(
+                select(Request.trap_type, func.count(Request.id).label('count'))
+                .where(Request.trap_type.isnot(None))
+                .group_by(Request.trap_type)
+                .order_by(func.count(Request.id).desc())
+            )
+            trap_type_breakdown = {r[0]: r[1] for r in trap_types.all()}
+
+            # Recent detected agents (last 20)
+            recent_agents = await session.execute(
+                select(
+                    Request.id, Request.timestamp, Request.source_ip,
+                    Request.country_name, Request.agent_type, Request.trap_type,
+                    Request.response_delta_ms, Request.path, Request.user_agent,
+                )
+                .where(Request.agent_type == "llm_agent")
+                .order_by(Request.timestamp.desc())
+                .limit(20)
+            )
+            detected_agents = [
+                {
+                    "id": r[0],
+                    "timestamp": r[1].isoformat() if r[1] else None,
+                    "source_ip": r[2],
+                    "country": r[3],
+                    "agent_type": r[4],
+                    "trap_type": r[5],
+                    "response_delta_ms": r[6],
+                    "path": r[7],
+                    "user_agent": str(r[8] or "")[:80],
+                }
+                for r in recent_agents.all()
+            ]
+
+            replay_chains = await session.execute(
+                select(
+                    Request.attack_chain_id,
+                    func.count(Request.id).label("count"),
+                    func.min(Request.timestamp),
+                    func.max(Request.timestamp),
+                )
+                .where(Request.attack_chain_id.isnot(None))
+                .group_by(Request.attack_chain_id)
+                .order_by(func.max(Request.timestamp).desc())
+                .limit(20)
+            )
+            recent_chains = [
+                {
+                    "attack_chain_id": r[0],
+                    "events": r[1],
+                    "first_seen": r[2].isoformat() if r[2] else None,
+                    "last_seen": r[3].isoformat() if r[3] else None,
+                }
+                for r in replay_chains.all()
+            ]
+
             return {
                 "threat_levels": threat_breakdown,
                 "threat_types": type_breakdown,
                 "critical_threats": critical_count.scalar() or 0,
+                "agent_types": agent_breakdown,
+                "trap_hits": trap_hits.scalar() or 0,
+                "trap_type_breakdown": trap_type_breakdown,
+                "detected_agents": detected_agents,
+                "recent_attack_chains": recent_chains,
             }
+
+    async def get_attack_chain(self, attack_chain_id: str, limit: int = 200) -> list[dict]:
+        """Return a replayable ordered chain of related events."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(Request)
+                .where(Request.attack_chain_id == attack_chain_id)
+                .order_by(Request.timestamp.asc())
+                .limit(limit)
+            )
+            return [r.to_dict() for r in result.scalars().all()]
 
 
 def generate_session_fingerprint(

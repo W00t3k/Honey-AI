@@ -8,8 +8,6 @@ Supports:
 - Email (SMTP)
 """
 
-import os
-import json
 import asyncio
 from typing import Optional
 from datetime import datetime
@@ -41,16 +39,29 @@ class AlertService:
     """Manages alert notifications."""
 
     def __init__(self):
-        self.slack_webhook = os.getenv("SLACK_WEBHOOK_URL")
-        self.discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
-        self.generic_webhook = os.getenv("WEBHOOK_URL")
-        self.alert_threshold = os.getenv("ALERT_THRESHOLD", "medium")  # low, medium, high, critical
-        self.enabled = any([self.slack_webhook, self.discord_webhook, self.generic_webhook])
+        self.slack_webhook = None
+        self.discord_webhook = None
+        self.generic_webhook = None
+        self.alert_threshold = "medium"
+        self.enabled = False
         self.client: Optional[httpx.AsyncClient] = None
 
         # Rate limiting
         self._last_alert_time = {}
-        self._rate_limit_seconds = int(os.getenv("ALERT_RATE_LIMIT", "60"))
+        self._rate_limit_seconds = 60
+        self.reload_from_config()
+
+    def reload_from_config(self):
+        """Refresh runtime settings from the config service."""
+        from services.config import get_config
+        config = get_config()
+
+        self.slack_webhook = config.get("slack_webhook_url")
+        self.discord_webhook = config.get("discord_webhook_url")
+        self.generic_webhook = config.get("webhook_url")
+        self.alert_threshold = config.get("alert_threshold", "medium")
+        self._rate_limit_seconds = int(config.get("alert_rate_limit", 60) or 60)
+        self.enabled = any([self.slack_webhook, self.discord_webhook, self.generic_webhook])
 
         if self.enabled:
             console.print("[green]Alert service enabled[/green]")

@@ -9,6 +9,7 @@ import asyncio
 import json
 import math
 import re
+import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
@@ -23,6 +24,7 @@ from rich.text import Text
 from models.db import Database, generate_session_fingerprint
 from services.geoip import GeoIPService, get_geoip_service
 from services.classifier import get_classifier, ClassificationResult
+from services.taxonomy import detect_framework, map_taxonomy
 
 console = Console()
 
@@ -104,6 +106,8 @@ class RequestLogger:
 
         # Extract headers
         headers = dict(request.headers)
+        from services.config import get_config
+        config = get_config()
 
         # Extract specific header values for analysis
         content_type = headers.get("content-type", "")
@@ -203,6 +207,47 @@ class RequestLogger:
             body=body_raw,
         )
 
+        # ── LLM Agent trap detection ──────────────────────────────────────
+        from services.agent_trap import get_trap_service
+        trap_svc = get_trap_service()
+        agent_signal = trap_svc.check_incoming(
+            ip=client_ip,
+            path=str(request.url.path),
+            body_raw=body_raw or "",
+        )
+        # Elevate classification if we have strong agent evidence
+        if agent_signal.agent_type == "llm_agent" and agent_signal.confidence >= 0.7:
+            if classification_result.classification not in ("credential_stuffer", "prompt_harvester"):
+                classification_result.classification = "credential_stuffer"
+                classification_result.reasons = (
+                    classification_result.reasons + agent_signal.reasons
+                )
+
+        framework = detect_framework(
+            user_agent=headers.get("user-agent"),
+            headers=headers,
+            body_parsed=body_parsed,
+            path=path_str,
+        )
+        attack_chain_id = self._build_attack_chain_id(
+            client_ip=client_ip,
+            api_key=api_key,
+            fingerprint=fingerprint,
+            framework=framework,
+        )
+        taxonomy = map_taxonomy(
+            path=path_str,
+            protocol=protocol,
+            classification=classification_result.classification,
+            headers=headers,
+            body_raw=body_raw,
+            body_parsed=body_parsed or {},
+            api_key=api_key,
+            has_tool_calls=has_tool_calls,
+            framework=framework,
+            agent_type=agent_signal.agent_type,
+        )
+
         # Build request data
         request_data = {
             "timestamp": datetime.utcnow(),
@@ -218,16 +263,16 @@ class RequestLogger:
             "method": request.method,
             "path": str(request.url.path),
             "query_string": str(request.url.query) if request.url.query else None,
-            "headers": headers,
-            "body_raw": body_raw,
-            "body_parsed": body_parsed,
+            "headers": headers if config.get("log_headers", True) else None,
+            "body_raw": body_raw if config.get("log_body", True) else None,
+            "body_parsed": body_parsed if config.get("log_body", True) else None,
             "auth_header": auth_header if auth_header else None,
             "api_key": api_key,
             "model_requested": model_requested,
             "messages": messages,
             "prompt": prompt,
             "response_status": response_status,
-            "response_body": response_body[:10000] if response_body else None,
+            "response_body": response_body[:10000] if response_body and config.get("log_response", True) else None,
             "response_time_ms": response_time_ms,
             "session_fingerprint": fingerprint,
             "user_agent": headers.get("user-agent"),
@@ -236,6 +281,18 @@ class RequestLogger:
             "classification_reasons": classification_result.reasons,
             "protocol": protocol,
             "has_tool_calls": has_tool_calls,
+            "agent_type": agent_signal.agent_type,
+            "trap_hit": agent_signal.trap_hit,
+            "trap_type": agent_signal.trap_type,
+            "response_delta_ms": agent_signal.response_delta_ms,
+            "framework": framework,
+            "attack_chain_id": attack_chain_id,
+            "attack_stage": taxonomy.attack_stage,
+            "owasp_categories": taxonomy.owasp_categories,
+            "mitre_atlas_tags": taxonomy.mitre_atlas_tags,
+            "realtime_session_id": self._extract_realtime_session_id(path_str, body_parsed),
+            "voice_profile": taxonomy.voice_profile,
+            "voice_metadata": taxonomy.voice_metadata,
         }
 
         # Log to database first to get ID
@@ -258,6 +315,10 @@ class RequestLogger:
             "stream": stream,
             "session_request_num": session_request_num,
             "ip_rate": ip_rate,
+            "framework": framework,
+            "attack_chain_id": attack_chain_id,
+            "owasp_categories": taxonomy.owasp_categories,
+            "mitre_atlas_tags": taxonomy.mitre_atlas_tags,
         }
 
         # Console output with correct ID
@@ -512,6 +573,18 @@ class RequestLogger:
             return "Insomnia"
         return None
 
+    def _build_attack_chain_id(self, client_ip: str, api_key: Optional[str], fingerprint: str, framework: Optional[str]) -> str:
+        basis = f"{client_ip}|{api_key or '-'}|{fingerprint}|{framework or '-'}"
+        return hashlib.sha256(basis.encode()).hexdigest()[:20]
+
+    def _extract_realtime_session_id(self, path: str, body_parsed: Optional[dict]) -> Optional[str]:
+        if path != "/v1/realtime" or not isinstance(body_parsed, dict):
+            return None
+        session = body_parsed.get("session", {})
+        if isinstance(session, dict):
+            return session.get("id")
+        return None
+
     def _print_request_verbose(
         self,
         request_id: int,
@@ -677,8 +750,51 @@ class RequestLogger:
             f"[bold {color}]{classification.classification.upper()}[/bold {color}] "
             f"({classification.confidence:.0%} confidence)",
         )
+        if data.get("framework"):
+            table.add_row("Framework", f"[bold cyan]{data['framework']}[/bold cyan]")
+        if data.get("attack_chain_id"):
+            table.add_row("Attack Chain", f"[dim]{data['attack_chain_id']}[/dim] ({data.get('attack_stage', 'unknown')})")
+        if extended.get("owasp_categories"):
+            table.add_row("OWASP", ", ".join(extended["owasp_categories"][:3]))
+        if extended.get("mitre_atlas_tags"):
+            table.add_row("MITRE ATLAS", ", ".join(extended["mitre_atlas_tags"][:2]))
+
+        # LLM Agent Detection row
+        agent_type = data.get("agent_type", "unknown")
+        trap_hit = data.get("trap_hit", False)
+        trap_type = data.get("trap_type")
+        delta_ms = data.get("response_delta_ms")
+
+        if agent_type != "unknown" or trap_hit or delta_ms is not None:
+            agent_parts = []
+            if agent_type == "llm_agent":
+                agent_parts.append("[bold red]🤖 LLM AGENT[/bold red]")
+            elif agent_type == "bot":
+                agent_parts.append("[yellow]🤖 BOT[/yellow]")
+            elif agent_type == "human":
+                agent_parts.append("[green]👤 HUMAN[/green]")
+            if delta_ms is not None:
+                agent_parts.append(f"Δ{delta_ms:.0f}ms")
+            if trap_hit:
+                agent_parts.append(f"[bold red]⚡ TRAP HIT ({trap_type})[/bold red]")
+            table.add_row("Agent Signal", " | ".join(agent_parts) if agent_parts else "—")
 
         console.print(table)
+
+        # LLM Agent confirmed banner
+        if agent_type == "llm_agent" and data.get("trap_hit"):
+            console.print()
+            console.print(Panel(
+                f"[bold white]🤖 CONFIRMED LLM AGENT — TRAP COMPLIANCE[/bold white]\n\n"
+                f"[yellow]IP:[/yellow]      {data['source_ip']}\n"
+                f"[yellow]Trap:[/yellow]    {trap_type}\n"
+                f"[yellow]Timing:[/yellow]  {delta_ms:.0f}ms response delta\n"
+                f"[yellow]Path:[/yellow]    {data['path']}\n\n"
+                f"[dim]An autonomous LLM agent followed an injected instruction in our response.[/dim]",
+                title="[bold yellow on red] 🤖 LLM AGENT DETECTED [/bold yellow on red]",
+                border_style="bold yellow",
+            ))
+            console.print()
 
         # ── SCORE BREAKDOWN ───────────────────────────────────────────────
         all_scores = getattr(classification, "all_scores", {})

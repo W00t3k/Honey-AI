@@ -35,3 +35,5 @@ Thumbs.db
 # Exports
 honeypot_export_*.json
 honeypot_export_*.csv
+honeypot/config.json
+config.json

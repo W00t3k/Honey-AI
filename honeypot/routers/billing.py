@@ -8,7 +8,6 @@ Handles high-value lure endpoints:
 - /v1/images/generations
 """
 
-import asyncio
 import json
 import random
 import time
@@ -19,6 +18,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from services import get_responder, get_logger
+from services.deception import add_realistic_delay, build_openai_headers
 
 router = APIRouter()
 
@@ -35,19 +35,9 @@ class ImageGenerationRequest(BaseModel):
     user: Optional[str] = None
 
 
-async def add_response_delay():
-    """Add random delay to avoid timing fingerprinting."""
-    delay = random.uniform(0.08, 0.3)
-    await asyncio.sleep(delay)
-
-
 def get_api_headers() -> dict:
     """Get headers that mimic real OpenAI API."""
-    return {
-        "openai-organization": "org-honeypot",
-        "openai-version": "2020-10-01",
-        "x-request-id": f"req_{random.randbytes(16).hex()}",
-    }
+    return build_openai_headers()
 
 
 @router.get("/v1/usage")
@@ -59,7 +49,7 @@ async def get_usage(request: Request):
     """
     start_time = time.time()
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     responder = get_responder()
     response_data = responder.usage()
@@ -93,7 +83,7 @@ async def get_billing_usage(request: Request):
     """
     start_time = time.time()
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     responder = get_responder()
     response_data = responder.billing_usage()
@@ -128,7 +118,7 @@ async def list_api_keys(request: Request):
     """
     start_time = time.time()
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     responder = get_responder()
     response_data = responder.api_keys()
@@ -161,7 +151,7 @@ async def list_assistants(request: Request):
     HIGH VALUE LURE: Attackers enumerate assistants to find system prompts.
     """
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.assistants_list()
     response_body = json.dumps(response_data)
@@ -183,7 +173,7 @@ async def create_assistant(request: Request):
         body_parsed = json.loads(body_raw) if body_raw else {}
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
-    await add_response_delay()
+    await add_realistic_delay()
     response_data = {
         "id": f"asst_{uuid.uuid4().hex[:24]}",
         "object": "assistant",
@@ -213,7 +203,7 @@ async def list_files(request: Request):
     HIGH VALUE LURE: Attackers look for training data and sensitive documents.
     """
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.files_list()
     response_body = json.dumps(response_data)
@@ -234,7 +224,7 @@ async def list_fine_tuning_jobs(request: Request):
     RECON LURE: Reveals model names and training file IDs to enumerate.
     """
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.fine_tuning_jobs()
     response_body = json.dumps(response_data)
@@ -251,7 +241,7 @@ async def list_fine_tuning_jobs(request: Request):
 async def list_threads(request: Request):
     """List assistant threads."""
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.threads_list()
     response_body = json.dumps(response_data)
@@ -273,7 +263,7 @@ async def create_thread(request: Request):
         body_parsed = json.loads(body_raw) if body_raw else {}
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
-    await add_response_delay()
+    await add_realistic_delay()
     response_data = {
         "id": f"thread_{uuid.uuid4().hex[:24]}",
         "object": "thread",
@@ -304,7 +294,7 @@ async def create_moderation(request: Request):
         body_parsed = json.loads(body_raw) if body_raw else {}
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.moderation_result(input_text=body_parsed.get("input", ""))
     response_body = json.dumps(response_data)
@@ -325,7 +315,7 @@ async def list_org_users(request: Request):
     HIGH VALUE LURE: Attackers enumerate users to understand org structure.
     """
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.org_users()
     response_body = json.dumps(response_data)
@@ -342,7 +332,7 @@ async def list_org_users(request: Request):
 async def list_org_projects(request: Request):
     """List organization projects — recon lure."""
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
     responder = get_responder()
     response_data = responder.org_projects()
     response_body = json.dumps(response_data)
@@ -371,7 +361,7 @@ async def create_response(request: Request):
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     model = body_parsed.get("model", "gpt-4o")
     input_data = body_parsed.get("input", body_parsed.get("messages", ""))
@@ -448,7 +438,7 @@ async def create_batch(request: Request):
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     batch_id = f"batch_{uuid.uuid4().hex[:24]}"
     response_data = {
@@ -494,7 +484,7 @@ async def create_batch(request: Request):
 async def list_batches(request: Request):
     """List batches — shows pending background jobs, recon lure."""
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
 
     batches = []
     for i in range(random.randint(1, 4)):
@@ -538,7 +528,7 @@ async def list_vector_stores(request: Request):
     then attempt to poison or exfiltrate it via the files endpoints.
     """
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
 
     stores = []
     names = ["customer-support-kb", "internal-docs", "product-manual", "code-index", "research-papers"]
@@ -590,7 +580,7 @@ async def create_vector_store(request: Request):
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     response_data = {
         "id": f"vs_{uuid.uuid4().hex[:24]}",
@@ -629,7 +619,7 @@ async def list_vector_store_files(store_id: str, request: Request):
     Attackers use this to understand what data is searchable and plan exfil.
     """
     start_time = time.time()
-    await add_response_delay()
+    await add_realistic_delay()
 
     filenames = [
         "q4_financial_report.pdf", "employee_handbook.pdf",

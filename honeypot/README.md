@@ -198,7 +198,12 @@ source venv/bin/activate
 python main.py
 ```
 
-Admin UI: `http://localhost:8000/admin` (change `ADMIN_PATH` to a secret path before deploying)
+`python main.py` now opens `PORT` plus any configured `ADDITIONAL_PORTS`.
+
+Recommended high-signal extra ports:
+`3000,5000,7860,8000,8080,8888,9000,11434`
+
+Admin UI: `http://localhost:80/admin` (change `ADMIN_PATH` to a secret path before deploying)
 
 ### GeoIP (optional but recommended)
 

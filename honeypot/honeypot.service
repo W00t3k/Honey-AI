@@ -10,7 +10,7 @@ Group=honeypot
 WorkingDirectory=/opt/honeypot
 Environment="PATH=/opt/honeypot/venv/bin"
 EnvironmentFile=/opt/honeypot/.env
-ExecStart=/opt/honeypot/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/honeypot/venv/bin/python main.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5

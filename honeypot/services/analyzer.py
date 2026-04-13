@@ -82,14 +82,20 @@ class GroqAnalyzer:
     """Analyzes honeypot requests using Groq LLM."""
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.client: Optional[httpx.AsyncClient] = None
+        self._forced_api_key = api_key
+        self._forced_model = model
+        self.reload_from_config()
+
+    def reload_from_config(self):
+        """Refresh runtime settings from config."""
         # Try config first, then env var
         from services.config import get_config
         config = get_config()
 
-        self.api_key = api_key or config.get("groq_api_key") or os.getenv("GROQ_API_KEY")
-        self.model = model or config.get("groq_model") or GROQ_MODEL
+        self.api_key = self._forced_api_key or config.get("groq_api_key") or os.getenv("GROQ_API_KEY")
+        self.model = self._forced_model or config.get("groq_model") or GROQ_MODEL
         self.enabled = bool(self.api_key) and config.get("groq_enabled", True)
-        self.client: Optional[httpx.AsyncClient] = None
 
         if self.enabled:
             console.print(f"[green]Groq analyzer enabled (model: {self.model})[/green]")

@@ -4,30 +4,20 @@ Models endpoint router.
 Handles /v1/models endpoints.
 """
 
-import asyncio
 import json
-import random
 import time
 
 from fastapi import APIRouter, Request, Response
 
 from services import get_responder, get_logger
+from services.deception import add_realistic_delay, build_openai_headers
 
 router = APIRouter()
 
 
-async def add_response_delay():
-    """Add random delay to avoid timing fingerprinting."""
-    delay = random.uniform(0.08, 0.3)
-    await asyncio.sleep(delay)
-
-
 def get_api_headers() -> dict:
     """Get headers that mimic real OpenAI API."""
-    return {
-        "openai-version": "2020-10-01",
-        "x-request-id": f"req_{random.randbytes(16).hex()}",
-    }
+    return build_openai_headers(include_org=False)
 
 
 @router.get("/v1/models")
@@ -39,7 +29,7 @@ async def list_models(request: Request):
     """
     start_time = time.time()
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     responder = get_responder()
     response_data = responder.models_list()
@@ -74,7 +64,7 @@ async def retrieve_model(model_id: str, request: Request):
     """
     start_time = time.time()
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     responder = get_responder()
     model_data = responder.model_retrieve(model_id)

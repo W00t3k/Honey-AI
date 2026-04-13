@@ -24,12 +24,35 @@ import json
 import random
 import time
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Request, Response, WebSocket, WebSocketDisconnect
 
 from services import get_logger
+from services.taxonomy import detect_framework, map_taxonomy
 
 router = APIRouter()
+
+REALTIME_PERSONAS = [
+    {
+        "name": "support_triage",
+        "voice": "alloy",
+        "instructions": "You are a customer support triage voice agent. You can search tickets, summarize incidents, and escalate billing issues.",
+        "tools": [{"type": "function", "name": "lookup_ticket"}, {"type": "function", "name": "escalate_case"}],
+    },
+    {
+        "name": "sales_assistant",
+        "voice": "verse",
+        "instructions": "You are a sales qualification voice agent for enterprise prospects. You can query CRM notes and book meetings.",
+        "tools": [{"type": "function", "name": "search_crm"}, {"type": "function", "name": "book_meeting"}],
+    },
+    {
+        "name": "internal_helpdesk",
+        "voice": "coral",
+        "instructions": "You are an internal helpdesk voice agent with access to device inventory and knowledge base articles.",
+        "tools": [{"type": "function", "name": "lookup_asset"}, {"type": "function", "name": "search_kb"}],
+    },
+]
 
 
 def _get_api_headers() -> dict:
@@ -373,6 +396,7 @@ async def realtime_websocket(websocket: WebSocket):
     await websocket.accept(subprotocol="realtime")
 
     session_id = uuid.uuid4().hex[:24]
+    persona = random.choice(REALTIME_PERSONAS)
     session_created = {
         "type": "session.created",
         "event_id": f"event_{uuid.uuid4().hex[:20]}",
@@ -381,8 +405,8 @@ async def realtime_websocket(websocket: WebSocket):
             "object": "realtime.session",
             "model": "gpt-4o-realtime-preview-2024-12-17",
             "modalities": ["audio", "text"],
-            "instructions": "You are a helpful assistant.",
-            "voice": "alloy",
+            "instructions": persona["instructions"],
+            "voice": persona["voice"],
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
             "input_audio_transcription": None,
@@ -392,65 +416,71 @@ async def realtime_websocket(websocket: WebSocket):
                 "prefix_padding_ms": 300,
                 "silence_duration_ms": 200,
             },
-            "tools": [],
+            "tools": persona["tools"],
             "tool_choice": "auto",
             "temperature": 0.8,
             "max_response_output_tokens": "inf",
         },
     }
 
+    event_log = []
+
     try:
         await websocket.send_text(json.dumps(session_created))
+        event_log.append({"direction": "server", "event": session_created})
 
-        # Receive the first client message (session.update with their config)
-        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
-        try:
-            client_msg = json.loads(raw)
-        except json.JSONDecodeError:
-            client_msg = {"raw": raw}
+        for _ in range(8):
+            raw = await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
+            try:
+                client_msg = json.loads(raw)
+            except json.JSONDecodeError:
+                client_msg = {"raw": raw}
+            event_log.append({"direction": "client", "event": client_msg})
 
-        # Log what the client sent (their session config = tools, instructions, model)
-        from services import get_logger as _get_logger
-        logger = _get_logger()
-
-        # Build a minimal fake request object for the logger
-        # We can't pass the WebSocket as a Request, so log via DB directly
-        from models.db import Database
-        # Use the logger's db reference
-        await logger.db.log_request({
-            "timestamp": __import__("datetime").datetime.utcnow(),
-            "source_ip": websocket.client.host if websocket.client else "unknown",
-            "source_port": websocket.client.port if websocket.client else None,
-            "country_code": None, "country_name": None, "city": None,
-            "latitude": None, "longitude": None, "asn": None, "asn_org": None,
-            "method": "WS",
-            "path": "/v1/realtime",
-            "query_string": None,
-            "headers": dict(websocket.headers),
-            "body_raw": raw,
-            "body_parsed": client_msg,
-            "auth_header": websocket.headers.get("authorization"),
-            "api_key": None,
-            "model_requested": client_msg.get("session", {}).get("model") if isinstance(client_msg, dict) else None,
-            "messages": None,
-            "prompt": None,
-            "response_status": 101,
-            "response_body": None,
-            "response_time_ms": 0,
-            "session_fingerprint": None,
-            "user_agent": websocket.headers.get("user-agent"),
-            "classification": "unknown",
-            "classification_confidence": 0.0,
-            "classification_reasons": ["WebSocket Realtime API connection"],
-            "protocol": "openai_api",
-            "has_tool_calls": bool(
-                isinstance(client_msg, dict)
-                and client_msg.get("session", {}).get("tools")
-            ),
-        })
+            event_type = client_msg.get("type") if isinstance(client_msg, dict) else None
+            if event_type == "session.update":
+                await websocket.send_text(json.dumps({
+                    "type": "session.updated",
+                    "event_id": f"event_{uuid.uuid4().hex[:20]}",
+                    "session": {
+                        **session_created["session"],
+                        **client_msg.get("session", {}),
+                    },
+                }))
+            elif event_type == "input_audio_buffer.append":
+                await websocket.send_text(json.dumps({
+                    "type": "input_audio_buffer.committed",
+                    "event_id": f"event_{uuid.uuid4().hex[:20]}",
+                    "item_id": f"item_{uuid.uuid4().hex[:16]}",
+                }))
+            elif event_type == "conversation.item.create":
+                await websocket.send_text(json.dumps({
+                    "type": "response.created",
+                    "event_id": f"event_{uuid.uuid4().hex[:20]}",
+                    "response": {
+                        "id": f"resp_{uuid.uuid4().hex[:20]}",
+                        "status": "in_progress",
+                        "voice": session_created["session"]["voice"],
+                        "output": [{"type": "text", "text": "Realtime response prepared."}],
+                    },
+                }))
+            elif event_type == "response.create":
+                await websocket.send_text(json.dumps({
+                    "type": "response.output_item.added",
+                    "event_id": f"event_{uuid.uuid4().hex[:20]}",
+                    "output_index": 0,
+                    "item": {
+                        "id": f"item_{uuid.uuid4().hex[:16]}",
+                        "type": "function_call",
+                        "name": random.choice([tool["name"] for tool in persona["tools"]]),
+                        "arguments": "{\"query\":\"active incident\"}",
+                    },
+                }))
+            elif event_type == "response.cancel":
+                break
 
         # Send an error to close cleanly
-        await websocket.send_text(json.dumps({
+        closing_event = {
             "type": "error",
             "event_id": f"event_{uuid.uuid4().hex[:20]}",
             "error": {
@@ -460,11 +490,79 @@ async def realtime_websocket(websocket: WebSocket):
                 "param": None,
                 "event_id": None,
             },
-        }))
+        }
+        await websocket.send_text(json.dumps(closing_event))
+        event_log.append({"direction": "server", "event": closing_event})
 
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     finally:
+        try:
+            logger = get_logger()
+            client_ip = websocket.client.host if websocket.client else "unknown"
+            headers = dict(websocket.headers)
+            framework = detect_framework(headers.get("user-agent"), headers, {"session": session_created["session"], "events": event_log}, "/v1/realtime")
+            taxonomy = map_taxonomy(
+                path="/v1/realtime",
+                protocol="openai_api",
+                classification="unknown",
+                headers=headers,
+                body_raw=json.dumps(event_log),
+                body_parsed={"session": session_created["session"], "events": event_log},
+                api_key=None,
+                has_tool_calls=any(
+                    isinstance(entry.get("event"), dict) and entry["event"].get("type") == "response.create"
+                    for entry in event_log
+                ),
+                framework=framework,
+                agent_type="unknown",
+            )
+            await logger.db.log_request({
+                "timestamp": datetime.utcnow(),
+                "source_ip": client_ip,
+                "source_port": websocket.client.port if websocket.client else None,
+                "country_code": None, "country_name": None, "city": None,
+                "latitude": None, "longitude": None, "asn": None, "asn_org": None,
+                "method": "WS",
+                "path": "/v1/realtime",
+                "query_string": None,
+                "headers": headers,
+                "body_raw": json.dumps(event_log),
+                "body_parsed": {"session": session_created["session"], "events": event_log, "persona": persona["name"]},
+                "auth_header": websocket.headers.get("authorization"),
+                "api_key": None,
+                "model_requested": session_created["session"]["model"],
+                "messages": None,
+                "prompt": session_created["session"]["instructions"],
+                "response_status": 101,
+                "response_body": None,
+                "response_time_ms": 0,
+                "session_fingerprint": None,
+                "user_agent": websocket.headers.get("user-agent"),
+                "classification": "unknown",
+                "classification_confidence": 0.0,
+                "classification_reasons": ["WebSocket Realtime API connection", f"voice persona={persona['name']}"],
+                "protocol": "openai_api",
+                "has_tool_calls": any(tool for tool in session_created["session"]["tools"]),
+                "agent_type": "unknown",
+                "trap_hit": False,
+                "trap_type": None,
+                "response_delta_ms": None,
+                "framework": framework,
+                "attack_chain_id": f"rt-{session_id}",
+                "attack_stage": "execution",
+                "owasp_categories": taxonomy.owasp_categories,
+                "mitre_atlas_tags": taxonomy.mitre_atlas_tags,
+                "realtime_session_id": session_id,
+                "voice_profile": session_created["session"]["voice"],
+                "voice_metadata": {
+                    **taxonomy.voice_metadata,
+                    "persona": persona["name"],
+                    "event_count": len(event_log),
+                },
+            })
+        except Exception:
+            pass
         try:
             await websocket.close()
         except Exception:

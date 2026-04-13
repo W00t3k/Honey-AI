@@ -4,7 +4,6 @@ Chat completions endpoint router.
 Handles /v1/chat/completions and /v1/completions endpoints.
 """
 
-import asyncio
 import json
 import random
 import time
@@ -15,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from services import get_responder, get_logger
+from services.deception import add_realistic_delay, build_openai_headers
 
 router = APIRouter()
 
@@ -61,12 +61,6 @@ class CompletionRequest(BaseModel):
     user: Optional[str] = None
 
 
-async def add_response_delay():
-    """Add random delay to avoid timing fingerprinting."""
-    delay = random.uniform(0.08, 0.3)  # 80-300ms
-    await asyncio.sleep(delay)
-
-
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """
@@ -84,7 +78,7 @@ async def chat_completions(request: Request):
         body_parsed = {"raw_invalid": body_raw}
 
     # Add realistic delay
-    await add_response_delay()
+    await add_realistic_delay()
 
     # Generate response
     responder = get_responder()
@@ -124,7 +118,7 @@ async def chat_completions(request: Request):
     return Response(
         content=response_body,
         media_type="application/json",
-        headers=get_api_headers(),
+        headers=get_api_headers(body_parsed.get("model", "gpt-4o")),
     )
 
 
@@ -143,7 +137,7 @@ async def completions(request: Request):
     except json.JSONDecodeError:
         body_parsed = {"raw_invalid": body_raw}
 
-    await add_response_delay()
+    await add_realistic_delay()
 
     responder = get_responder()
     response_data = responder.completion(
@@ -168,7 +162,7 @@ async def completions(request: Request):
     return Response(
         content=response_body,
         media_type="application/json",
-        headers=get_api_headers(),
+        headers=get_api_headers(body_parsed.get("model", "gpt-3.5-turbo-instruct")),
     )
 
 
@@ -207,7 +201,7 @@ async def stream_response(response_data: dict):
         }
 
         yield f"data: {json.dumps(chunk_data)}\n\n"
-        await asyncio.sleep(random.uniform(0.01, 0.05))
+        await add_realistic_delay()
 
     # Send final chunk
     final_chunk = {
@@ -228,18 +222,6 @@ async def stream_response(response_data: dict):
     yield "data: [DONE]\n\n"
 
 
-def get_api_headers() -> dict:
+def get_api_headers(model: str) -> dict:
     """Get headers that mimic real OpenAI API."""
-    return {
-        "openai-model": "gpt-4o",
-        "openai-organization": "org-honeypot",
-        "openai-processing-ms": str(random.randint(100, 500)),
-        "openai-version": "2020-10-01",
-        "x-ratelimit-limit-requests": "10000",
-        "x-ratelimit-limit-tokens": "2000000",
-        "x-ratelimit-remaining-requests": str(random.randint(9000, 9999)),
-        "x-ratelimit-remaining-tokens": str(random.randint(1900000, 1999999)),
-        "x-ratelimit-reset-requests": "1ms",
-        "x-ratelimit-reset-tokens": "1ms",
-        "x-request-id": f"req_{random.randbytes(16).hex()}",
-    }
+    return build_openai_headers(model=model)

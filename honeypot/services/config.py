@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
+from copy import deepcopy
 from rich.console import Console
 
 console = Console()
@@ -28,6 +29,7 @@ class HoneypotConfig:
     groq_api_key: str = ""
     groq_enabled: bool = True
     groq_model: str = "llama-3.1-8b-instant"
+    groq_chat_model: str = "llama-3.3-70b-versatile"
 
     # Alert Webhooks
     slack_webhook_url: str = ""
@@ -75,6 +77,8 @@ class HoneypotConfig:
 
     # Response Customization
     fake_org_name: str = "org-honeypot"
+    fake_company_name: str = "Company Corp"
+    fake_company_domain: str = "company.internal"
     response_delay_min_ms: int = 80
     response_delay_max_ms: int = 300
 
@@ -136,11 +140,7 @@ class ConfigService:
                     data = json.load(f)
                     for key, value in data.items():
                         if hasattr(self.config, key):
-                            # Always restore setup_complete and canary_tokens even if falsy
-                            if key in ("setup_complete", "canary_tokens"):
-                                setattr(self.config, key, value)
-                            elif value:  # Only override non-empty values for other fields
-                                setattr(self.config, key, value)
+                            setattr(self.config, key, value)
                 console.print(f"[green]Loaded config from {CONFIG_FILE}[/green]")
             except Exception as e:
                 console.print(f"[yellow]Config load warning: {e}[/yellow]")
@@ -150,12 +150,15 @@ class ConfigService:
         if env_pw and env_pw not in ("changeme", "admin", "") and not self.config.setup_complete:
             self.config.setup_complete = True
 
+        self._normalize_config()
+
         # Auto-seed canary tokens if none exist
         self._auto_seed_canary_tokens()
 
     def save(self):
         """Save configuration to file."""
         try:
+            self._normalize_config()
             with open(CONFIG_FILE, "w") as f:
                 json.dump(asdict(self.config), f, indent=2)
             console.print(f"[green]Config saved to {CONFIG_FILE}[/green]")
@@ -208,11 +211,11 @@ class ConfigService:
         """Update configuration values."""
         for key, value in kwargs.items():
             if hasattr(self.config, key):
-                # Don't overwrite with empty strings for sensitive fields
-                if value == "" and key in ["groq_api_key", "slack_webhook_url", "discord_webhook_url",
-                                           "webhook_url", "admin_password", "jwt_secret"]:
+                # Avoid accidentally blanking core admin auth fields through partial updates.
+                if value == "" and key in ["admin_password", "jwt_secret"]:
                     continue
                 setattr(self.config, key, value)
+        self._normalize_config()
         return self.save()
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -227,6 +230,50 @@ class ConfigService:
         """Get configuration without sensitive values."""
         return self.config.to_safe_dict()
 
+    def _normalize_config(self):
+        """Normalize settings loaded from env/UI to a sane internal shape."""
+        cfg = self.config
+
+        if not cfg.jwt_secret:
+            cfg.jwt_secret = os.getenv("JWT_SECRET", "") or secrets_token(64)
+
+        cfg.alert_threshold = (cfg.alert_threshold or "medium").lower()
+        if cfg.alert_threshold not in {"all", "low", "medium", "high", "critical"}:
+            cfg.alert_threshold = "medium"
+
+        cfg.smtp_port = _coerce_int(cfg.smtp_port, 587, minimum=1, maximum=65535)
+        cfg.alert_rate_limit = _coerce_int(cfg.alert_rate_limit, 60, minimum=0, maximum=86400)
+        cfg.retention_days = _coerce_int(cfg.retention_days, 90, minimum=0, maximum=3650)
+        cfg.max_db_size_mb = _coerce_int(cfg.max_db_size_mb, 0, minimum=0, maximum=1024 * 1024)
+        cfg.response_delay_min_ms = _coerce_int(cfg.response_delay_min_ms, 80, minimum=0, maximum=15000)
+        cfg.response_delay_max_ms = _coerce_int(cfg.response_delay_max_ms, 300, minimum=0, maximum=15000)
+        if cfg.response_delay_max_ms < cfg.response_delay_min_ms:
+            cfg.response_delay_max_ms = cfg.response_delay_min_ms
+
+        cfg.additional_ports = sorted({
+            port for port in (_parse_port(p) for p in (cfg.additional_ports or []))
+            if port is not None
+        })
+
+        cfg.canary_tokens = _normalize_canary_tokens(cfg.canary_tokens)
+
+        cfg.fake_org_name = (cfg.fake_org_name or "org-honeypot").strip()
+        cfg.fake_company_name = (cfg.fake_company_name or "Company Corp").strip()
+        cfg.fake_company_domain = (cfg.fake_company_domain or "company.internal").strip().lower()
+
+        # Migrate legacy plaintext admin passwords into bcrypt on write.
+        if cfg.setup_complete and cfg.admin_password and not _looks_hashed(cfg.admin_password):
+            try:
+                from passlib.context import CryptContext
+                pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
+                cfg.admin_password = pwd_context.hash(cfg.admin_password)
+                console.print("[yellow]Migrated plaintext admin password to a password hash[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]Admin password migration warning: {e}[/yellow]")
+
+        # Prevent accidental mutation by callers that retain references.
+        cfg.canary_tokens = deepcopy(cfg.canary_tokens)
+
 
 # Singleton
 _config_service: Optional[ConfigService] = None
@@ -237,3 +284,75 @@ def get_config() -> ConfigService:
     if _config_service is None:
         _config_service = ConfigService()
     return _config_service
+
+
+def _coerce_int(value: Any, default: Optional[int], minimum: Optional[int] = None, maximum: Optional[int] = None) -> Optional[int]:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and coerced < minimum:
+        return minimum
+    if maximum is not None and coerced > maximum:
+        return maximum
+    return coerced
+
+
+def _looks_hashed(value: str) -> bool:
+    return (
+        value.startswith("$2a$")
+        or value.startswith("$2b$")
+        or value.startswith("$pbkdf2-sha256$")
+    )
+
+
+def secrets_token(length: int = 64) -> str:
+    return "".join(random.choices(string.ascii_letters + string.digits, k=length))
+
+
+def _normalize_canary_tokens(tokens: Any) -> list[dict]:
+    """Accept both legacy string arrays and structured token objects."""
+    if not isinstance(tokens, list):
+        return []
+
+    normalized: list[dict] = []
+    seen: set[str] = set()
+
+    for item in tokens:
+        if isinstance(item, str):
+            token_value = item.strip()
+            token = {
+                "id": uuid.uuid4().hex[:8],
+                "label": "Imported Canary",
+                "token": token_value,
+                "note": "migrated from legacy format",
+                "added_at": datetime.now(timezone.utc).isoformat(),
+            }
+        elif isinstance(item, dict):
+            token_value = str(item.get("token", "")).strip()
+            token = {
+                "id": str(item.get("id") or uuid.uuid4().hex[:8])[:8],
+                "label": str(item.get("label") or "Canary Token").strip(),
+                "token": token_value,
+                "note": str(item.get("note") or "").strip(),
+                "added_at": str(item.get("added_at") or datetime.now(timezone.utc).isoformat()),
+            }
+        else:
+            continue
+
+        if not token_value or token_value in seen:
+            continue
+        seen.add(token_value)
+        normalized.append(token)
+
+    return normalized
+
+
+def _parse_port(value: Any) -> Optional[int]:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= port <= 65535:
+        return port
+    return None

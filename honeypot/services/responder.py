@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
+from services.deception import get_company_profile
+
 
 def generate_completion_id() -> str:
     """Generate a realistic completion ID."""
@@ -440,6 +442,7 @@ class ResponseGenerator:
         """
         keys = []
         now = datetime.now()
+        profile = get_company_profile()
 
         # Randomly generated canary keys
         for i in range(random.randint(2, 4)):
@@ -486,7 +489,7 @@ class ResponseGenerator:
                         "user": {
                             "id": f"user-{uuid.uuid4().hex[:24]}",
                             "name": "API User",
-                            "email": f"user{random.randint(1, 99)}@company.com",
+                            "email": f"user{random.randint(1, 99)}@{profile['company_domain']}",
                         },
                     },
                 })
@@ -550,6 +553,7 @@ class ResponseGenerator:
     def fine_tuning_jobs(self) -> dict:
         """Generate fake fine-tuning jobs list."""
         now = datetime.now()
+        profile = get_company_profile()
         jobs = []
         for i in range(random.randint(1, 3)):
             created = now - timedelta(days=random.randint(1, 30))
@@ -560,7 +564,7 @@ class ResponseGenerator:
                 "finished_at": int((created + timedelta(hours=random.randint(1, 4))).timestamp()),
                 "model": random.choice(["gpt-4o-mini-2024-07-18", "gpt-3.5-turbo-0125"]),
                 "fine_tuned_model": f"ft:gpt-4o-mini:custom::{uuid.uuid4().hex[:8]}",
-                "organization_id": "org-honeypot",
+                "organization_id": profile["fake_org_name"],
                 "status": "succeeded",
                 "training_file": f"file-{uuid.uuid4().hex[:24]}",
                 "validation_file": None,
@@ -616,6 +620,7 @@ class ResponseGenerator:
     def org_users(self) -> dict:
         """Generate fake organization users (recon lure)."""
         now = datetime.now()
+        profile = get_company_profile()
         users = []
         first_names = ["Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace"]
         last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller"]
@@ -628,7 +633,7 @@ class ResponseGenerator:
                 "object": "organization.user",
                 "id": f"user-{uuid.uuid4().hex[:24]}",
                 "name": f"{fn} {ln}",
-                "email": f"{fn.lower()}.{ln.lower()}@company.com",
+                "email": f"{fn.lower()}.{ln.lower()}@{profile['company_domain']}",
                 "role": random.choice(roles),
                 "added_at": int(added.timestamp()),
             })

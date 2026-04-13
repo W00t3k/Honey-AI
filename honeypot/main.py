@@ -8,7 +8,9 @@ For security research purposes only.
 """
 
 import json
+import multiprocessing
 import os
+import signal
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -25,6 +27,7 @@ load_dotenv()
 
 from models.db import Database
 from services import init_logger, get_geoip_service, get_logger
+from services.config import get_config
 from routers import (
     chat_router,
     models_router,
@@ -38,6 +41,7 @@ from routers import (
     vectordb_router,
     azure_router,
     cohere_router,
+    recon_router,
     admin_router,
     set_database,
 )
@@ -125,6 +129,7 @@ def country_flag(country_code: str) -> str:
 templates.env.filters["country_flag"] = country_flag
 
 # Include routers — order matters: specific routes before catch-all
+app.include_router(recon_router)
 app.include_router(azure_router)
 app.include_router(cohere_router)
 app.include_router(chat_router)
@@ -163,15 +168,13 @@ async def add_custom_headers(request: Request, call_next):
 
 @app.get("/")
 async def root(request: Request):
-    """Root endpoint - fake OpenAI dashboard (honeypot lure)."""
-    from services.config import get_config
-    canary_tokens = get_config().get("canary_tokens", [])[:6]
-    return templates.TemplateResponse("index.html", {"request": request, "canary_tokens": canary_tokens})
+    """Root endpoint - public AI chatbot (honeypot lure)."""
+    return templates.TemplateResponse("chat.html", {"request": request})
 
 
 @app.get("/dashboard")
 async def dashboard(request: Request):
-    """Dashboard alias."""
+    """Fake OpenAI developer dashboard with canary API keys."""
     from services.config import get_config
     canary_tokens = get_config().get("canary_tokens", [])[:6]
     return templates.TemplateResponse("index.html", {"request": request, "canary_tokens": canary_tokens})
@@ -192,6 +195,34 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/v1/verify/{token}")
+async def agent_trap_verify(request: Request, token: str):
+    """
+    Redirect trap endpoint for LLM agent detection.
+
+    Any request here was triggered by an injected instruction in a previous
+    response — confirming an LLM agent is autonomously following instructions.
+    The trap_service detects this in check_incoming() via path matching.
+    """
+    # Log as normal — agent_trap.check_incoming handles classification
+    body_raw = ""
+    body_parsed = {"trap_token": token}
+    logger = get_logger()
+    await logger.log_request(
+        request=request,
+        body_raw=body_raw,
+        body_parsed=body_parsed,
+        response_body='{"error":"invalid_api_key","message":"Authentication failed"}',
+        response_status=401,
+        response_time_ms=50,
+    )
+    return Response(
+        content='{"error":{"message":"Invalid authentication token.","type":"invalid_request_error","code":"invalid_api_key"}}',
+        status_code=401,
+        media_type="application/json",
+    )
+
+
 @app.get("/playground")
 async def playground(request: Request):
     """Playground - chat interface."""
@@ -199,9 +230,51 @@ async def playground(request: Request):
 
 
 @app.get("/chat")
-async def chat(request: Request):
+async def chat_page(request: Request):
     """Chat interface alias."""
     return templates.TemplateResponse("chat.html", {"request": request})
+
+
+@app.post("/ui/api/chat")
+async def ui_api_chat(request: Request):
+    """
+    Public browser chatbot endpoint backed by real Groq LLM.
+
+    Streams responses as SSE so the UI renders tokens in real time.
+    All conversations are logged for threat intelligence.
+    """
+    from fastapi.responses import StreamingResponse
+    from services.groq_chat import get_groq_chat
+
+    body_raw = (await request.body()).decode("utf-8", errors="replace")
+    try:
+        body_parsed = json.loads(body_raw) if body_raw else {}
+    except json.JSONDecodeError:
+        body_parsed = {}
+
+    messages = body_parsed.get("messages", [])
+
+    # Log the chatbot interaction
+    logger = get_logger()
+    await logger.log_request(
+        request=request,
+        body_raw=body_raw,
+        body_parsed=body_parsed,
+        response_body="[streaming]",
+        response_status=200,
+        response_time_ms=0,
+    )
+
+    groq_chat = get_groq_chat()
+    return StreamingResponse(
+        groq_chat.stream(messages),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # Catch-all for unknown paths (log but return generic response)
@@ -251,13 +324,72 @@ async def catch_all(request: Request, path: str):
     )
 
 
-if __name__ == "__main__":
+def _get_listen_ports() -> list[int]:
+    """Return the primary and configured additional listener ports."""
+    config = get_config()
+    ports = [PORT]
+    for extra in config.get("additional_ports", []) or []:
+        if extra not in ports:
+            ports.append(extra)
+    return ports
+
+
+def _run_single_server(port: int):
     import uvicorn
 
     uvicorn.run(
         "main:app",
         host=HOST,
-        port=PORT,
+        port=port,
         log_level="info",
-        access_log=False,  # We do our own logging
+        access_log=False,
     )
+
+
+def _run_multiport_servers():
+    ports = _get_listen_ports()
+    if len(ports) == 1:
+        _run_single_server(ports[0])
+        return
+
+    console.print(
+        f"[bold yellow]Starting listener ports:[/bold yellow] "
+        f"{', '.join(str(port) for port in ports)}"
+    )
+
+    children: list[multiprocessing.Process] = []
+    stopping = False
+
+    def handle_shutdown(*_args):
+        nonlocal stopping
+        stopping = True
+        for child in children:
+            if child.is_alive():
+                child.terminate()
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+    for port in ports:
+        child = multiprocessing.Process(target=_run_single_server, args=(port,))
+        child.start()
+        children.append(child)
+
+    try:
+        while not stopping:
+            for child in children:
+                if child.exitcode not in (None, 0):
+                    console.print(f"[red]Listener on child pid {child.pid} exited with {child.exitcode}[/red]")
+                    stopping = True
+                    break
+            time.sleep(1)
+    finally:
+        for child in children:
+            if child.is_alive():
+                child.terminate()
+        for child in children:
+            child.join(timeout=5)
+
+
+if __name__ == "__main__":
+    _run_multiport_servers()
