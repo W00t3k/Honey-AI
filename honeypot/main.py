@@ -42,6 +42,7 @@ from routers import (
     azure_router,
     cohere_router,
     recon_router,
+    lures_router,
     admin_router,
     set_database,
 )
@@ -85,17 +86,29 @@ async def lifespan(app: FastAPI):
     # Set database for admin routes
     set_database(db)
 
+    from services.ssh_honeypot import get_ssh_honeypot
+    ssh_honeypot = get_ssh_honeypot()
+    ssh_owner = os.getenv("SSH_HONEYPOT_OWNER", "1") == "1"
+    if ssh_owner:
+        await ssh_honeypot.start()
+
     from routers.admin import ADMIN_PATH
     console.print(f"\n[bold green]Listening on {HOST}:{PORT}[/bold green]")
     console.print(f"[dim]Admin UI : http://127.0.0.1:{PORT}{ADMIN_PATH}[/dim]")
     if ADMIN_PATH == "/admin":
         console.print("[yellow]⚠  Set ADMIN_PATH in .env to a secret path before deploying publicly[/yellow]")
+    if ssh_owner and get_config().get("ssh_honeypot_enabled", False):
+        console.print(
+            f"[dim]SSH UI   : {get_config().get('ssh_listen_host', '0.0.0.0')}:{get_config().get('ssh_listen_port', 2222)}[/dim]"
+        )
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
     yield
 
     # Shutdown
     console.print("\n[yellow]Shutting down...[/yellow]")
+    if ssh_owner:
+        await ssh_honeypot.stop()
     await db.close()
     geoip.close()
     console.print("[green]Goodbye![/green]")
@@ -129,6 +142,7 @@ def country_flag(country_code: str) -> str:
 templates.env.filters["country_flag"] = country_flag
 
 # Include routers — order matters: specific routes before catch-all
+app.include_router(lures_router)   # credential/config lures (robots.txt, .env, etc.)
 app.include_router(recon_router)
 app.include_router(azure_router)
 app.include_router(cohere_router)
@@ -144,6 +158,23 @@ app.include_router(gemini_router)
 app.include_router(vectordb_router)
 # Admin router self-manages its prefix via ADMIN_PATH env var (set in .env)
 app.include_router(admin_router)
+
+
+@app.middleware("http")
+async def tarpit_middleware(request: Request, call_next):
+    """Apply tarpit delays to repeat-abuser IPs (transparent to attacker)."""
+    from services.tarpit import get_tarpit
+    from services.config import get_config
+    from routers.admin import ADMIN_PATH
+    # Only tarpit API endpoints, not the admin UI or WebSocket
+    path = request.url.path
+    if not path.startswith(("/ws/", "/static/", ADMIN_PATH)) and get_config().get("tarpit_enabled", True):
+        client_ip = (
+            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else "unknown")
+        )
+        await get_tarpit().apply(client_ip)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -193,6 +224,24 @@ async def api_root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/metrics")
+async def prometheus_metrics(request: Request):
+    """
+    Prometheus-compatible metrics endpoint.
+
+    Exposes request counts, threat distributions, canary hits, agent trap
+    hits, and latency summaries in standard Prometheus exposition format.
+
+    Restrict access to this endpoint in production via nginx/firewall so
+    only your Prometheus scraper can reach it.
+    """
+    from services.metrics import get_metrics
+    return Response(
+        content=get_metrics().render(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 @app.get("/v1/verify/{token}")
@@ -252,6 +301,15 @@ async def ws_feed(websocket: WebSocket):
         pass
     finally:
         manager.disconnect(websocket)
+
+
+from routers.admin import ADMIN_PATH
+
+
+@app.websocket(f"{ADMIN_PATH}/ws/feed")
+async def admin_ws_feed(websocket: WebSocket):
+    """Admin-scoped alias so the /admin cookie path is sent by the browser."""
+    await ws_feed(websocket)
 
 
 @app.get("/playground")
@@ -365,8 +423,10 @@ def _get_listen_ports() -> list[int]:
     return ports
 
 
-def _run_single_server(port: int):
+def _run_single_server(port: int, ssh_owner: bool = False):
     import uvicorn
+
+    os.environ["SSH_HONEYPOT_OWNER"] = "1" if ssh_owner else "0"
 
     uvicorn.run(
         "main:app",
@@ -380,7 +440,7 @@ def _run_single_server(port: int):
 def _run_multiport_servers():
     ports = _get_listen_ports()
     if len(ports) == 1:
-        _run_single_server(ports[0])
+        _run_single_server(ports[0], ssh_owner=True)
         return
 
     console.print(
@@ -401,8 +461,8 @@ def _run_multiport_servers():
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
 
-    for port in ports:
-        child = multiprocessing.Process(target=_run_single_server, args=(port,))
+    for idx, port in enumerate(ports):
+        child = multiprocessing.Process(target=_run_single_server, args=(port, idx == 0))
         child.start()
         children.append(child)
 

@@ -5,6 +5,8 @@ from .logger import RequestLogger, get_logger, init_logger
 from .analyzer import GroqAnalyzer, get_analyzer, analyze_request, ThreatAnalysis
 from .config import ConfigService, get_config, HoneypotConfig
 from .alerts import AlertService, get_alert_service, Alert
+from .session_store import SessionStore, get_session_store
+from .ssh_honeypot import SSHHoneypotService, get_ssh_honeypot
 
 __all__ = [
     "GeoIPService",
@@ -27,4 +29,8 @@ __all__ = [
     "AlertService",
     "get_alert_service",
     "Alert",
+    "SessionStore",
+    "get_session_store",
+    "SSHHoneypotService",
+    "get_ssh_honeypot",
 ]

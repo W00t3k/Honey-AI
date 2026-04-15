@@ -304,6 +304,7 @@ class RequestLogger:
             "attack_stage": taxonomy.attack_stage,
             "owasp_categories": taxonomy.owasp_categories,
             "mitre_atlas_tags": taxonomy.mitre_atlas_tags,
+            "cwe_ids": taxonomy.cwe_ids,
             "realtime_session_id": self._extract_realtime_session_id(path_str, body_parsed),
             "voice_profile": taxonomy.voice_profile,
             "voice_metadata": taxonomy.voice_metadata,
@@ -312,6 +313,21 @@ class RequestLogger:
         # Log to database first to get ID
         logged = await self.db.log_request(request_data)
         request_id = logged.id
+
+        # Record Prometheus metrics
+        try:
+            from services.metrics import get_metrics
+            get_metrics().record_request(
+                protocol=protocol,
+                classification=classification_result.classification,
+                threat_level="unknown",  # filled in after Groq analysis
+                duration_s=(response_time_ms or 0) / 1000.0,
+                source_ip=client_ip,
+            )
+            if agent_signal.trap_hit:
+                get_metrics().record_agent_trap_hit()
+        except Exception:
+            pass
 
         # Broadcast to live dashboard WebSocket clients immediately
         try:
@@ -423,6 +439,13 @@ class RequestLogger:
                     existing_notes = req.notes or ""
                     req.notes = f"CANARY REUSE{label_str}: key={api_key[:20]}... | {existing_notes}".strip(" |")
                     await session.commit()
+
+            # Record Prometheus canary hit
+            try:
+                from services.metrics import get_metrics
+                get_metrics().record_canary_hit()
+            except Exception:
+                pass
 
             # Console alert
             from rich.panel import Panel as RichPanel

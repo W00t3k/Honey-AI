@@ -19,6 +19,13 @@ from services.deception import add_realistic_delay, build_openai_headers
 router = APIRouter()
 
 
+def _get_source_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 class ChatMessage(BaseModel):
     """Chat message format."""
     role: str
@@ -82,11 +89,13 @@ async def chat_completions(request: Request):
 
     # Generate response
     responder = get_responder()
-    response_data = responder.chat_completion(
+    response_data = await responder.chat_completion_async(
         model=body_parsed.get("model", "gpt-4o"),
         messages=body_parsed.get("messages", []),
         stream=body_parsed.get("stream", False),
         max_tokens=body_parsed.get("max_tokens"),
+        source_ip=_get_source_ip(request),
+        protocol="openai_api",
     )
 
     response_body = json.dumps(response_data)
@@ -140,10 +149,12 @@ async def completions(request: Request):
     await add_realistic_delay()
 
     responder = get_responder()
-    response_data = responder.completion(
+    response_data = await responder.completion_async(
         model=body_parsed.get("model", "gpt-3.5-turbo-instruct"),
         prompt=body_parsed.get("prompt", ""),
         max_tokens=body_parsed.get("max_tokens"),
+        source_ip=_get_source_ip(request),
+        protocol="openai_api",
     )
 
     response_body = json.dumps(response_data)

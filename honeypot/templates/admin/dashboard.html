@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Console</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -439,6 +440,92 @@
         ::-webkit-scrollbar-thumb { background: rgba(100, 100, 150, 0.5); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 150, 0.7); }
 
+        /* Activity chart */
+        .chart-container {
+            position: relative;
+            height: 160px;
+        }
+
+        /* Filter bar */
+        .filter-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            flex-wrap: wrap;
+        }
+
+        .filter-input {
+            flex: 1;
+            min-width: 180px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 7px 12px;
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .filter-input:focus {
+            border-color: var(--accent);
+        }
+
+        .filter-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .filter-select {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 7px 10px;
+            color: var(--text-primary);
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .filter-select:focus {
+            border-color: var(--accent);
+        }
+
+        .filter-clear {
+            padding: 7px 14px;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-clear:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .filter-count {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .stat-card .stat-delta {
+            font-size: 11px;
+            margin-top: 4px;
+            font-weight: 500;
+        }
+        .stat-delta.up { color: var(--success); }
+        .stat-delta.down { color: var(--danger); }
+        .stat-delta.neutral { color: var(--text-secondary); }
+
         .groq-badge {
             display: inline-flex;
             align-items: center;
@@ -527,9 +614,189 @@
             color: #e94560;
             font-weight: 600;
         }
+
+        /* Clickable stat cards */
+        .stat-card.clickable {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .stat-card.clickable:hover {
+            border-color: var(--accent) !important;
+            background: rgba(233, 69, 96, 0.08) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.2);
+        }
+        .stat-card.clickable::after {
+            content: " ↓";
+            font-size: 10px;
+            color: var(--text-secondary);
+            display: block;
+            margin-top: 4px;
+        }
+
+        /* Inline detail rows (port, location, session, etc.) */
+        .detail-rows {
+            display: grid;
+            grid-template-columns: 110px 1fr;
+            gap: 3px 10px;
+            font-size: 11px;
+            margin-bottom: 10px;
+            padding: 8px 0 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .detail-label {
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.4px;
+            align-self: center;
+            white-space: nowrap;
+        }
+        .detail-value {
+            font-family: monospace;
+            color: var(--text-primary);
+            font-size: 11px;
+            word-break: break-all;
+        }
+
+        /* Always-visible taxonomy strip below the badge row */
+        .taxonomy-inline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+
+        /* Taxonomy sections (OWASP / MITRE / CWE) */
+        .taxonomy-section {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .taxonomy-section h4 {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        .taxonomy-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .owasp-tag {
+            font-size: 10px;
+            padding: 2px 7px;
+            background: rgba(251, 146, 60, 0.1);
+            border: 1px solid rgba(251, 146, 60, 0.35);
+            border-radius: 4px;
+            color: #fb923c;
+        }
+        .mitre-tag {
+            font-size: 10px;
+            padding: 2px 7px;
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.35);
+            border-radius: 4px;
+            color: #f87171;
+        }
+        .cwe-tag {
+            font-size: 10px;
+            padding: 2px 7px;
+            background: rgba(167, 139, 250, 0.1);
+            border: 1px solid rgba(167, 139, 250, 0.35);
+            border-radius: 4px;
+            color: #a78bfa;
+        }
+
+        /* Action bar inside expanded request */
+        .action-bar {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .action-btn {
+            padding: 4px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: transparent;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+        .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .action-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+        .action-btn.flagged {
+            background: rgba(251, 191, 36, 0.15);
+            border-color: #fbbf24;
+            color: #fbbf24;
+        }
+        .note-input {
+            flex: 1;
+            min-width: 130px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 4px 8px;
+            color: var(--text-primary);
+            font-size: 11px;
+            outline: none;
+        }
+        .note-input:focus { border-color: var(--accent); }
+
+        /* Delete confirmation modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box {
+            background: var(--bg-secondary);
+            border: 1px solid rgba(248, 113, 113, 0.4);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 380px;
+            width: 90%;
+        }
+        .modal-box h3 { font-size: 15px; color: var(--danger); margin-bottom: 10px; }
+        .modal-box p { font-size: 13px; color: var(--text-secondary); margin-bottom: 18px; line-height: 1.5; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+        @keyframes fadeOutRow {
+            from { opacity: 1; transform: scaleY(1); max-height: 200px; }
+            to   { opacity: 0; transform: scaleY(0); max-height: 0; padding: 0; }
+        }
+        .deleting { animation: fadeOutRow 0.3s forwards; overflow: hidden; }
     </style>
 </head>
 <body>
+    <!-- Delete confirmation modal -->
+    <div class="modal-overlay" id="delete-modal">
+        <div class="modal-box">
+            <h3>Delete Request?</h3>
+            <p>This will permanently remove the request from the database. This cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="document.getElementById('delete-modal').classList.remove('open')">Cancel</button>
+                <button class="btn btn-primary" style="background:var(--danger);" onclick="executeDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <header class="header">
         <div class="logo">
             <h1>Console</h1>
@@ -551,35 +818,35 @@
 
     <div class="container">
         <div class="stats-grid">
-            <div class="stat-card">
+            <div class="stat-card clickable" onclick="filterByCard('clear')">
                 <h3>Total Requests</h3>
                 <div class="stat-value" id="total-requests">{{ stats.total_requests }}</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card clickable" onclick="filterByCard('text', 'source_ip')">
                 <h3>Unique IPs</h3>
                 <div class="stat-value" id="unique-ips">{{ stats.unique_ips }}</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card clickable" onclick="filterByCard('text', 'key:')">
                 <h3>API Keys Captured</h3>
                 <div class="stat-value" id="unique-keys">{{ stats.unique_api_keys }}</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card clickable" onclick="filterByCard('class', 'credential_stuffer')">
                 <h3>Credential Stuffers</h3>
                 <div class="stat-value" id="credential-stuffers">{{ stats.classification_breakdown.get('credential_stuffer', 0) }}</div>
             </div>
-            <div class="stat-card" style="border-color: rgba(139, 92, 246, 0.4);">
+            <div class="stat-card clickable" style="border-color: rgba(139, 92, 246, 0.4);" onclick="filterByCard('proto', 'mcp')">
                 <h3>MCP Probes</h3>
                 <div class="stat-value" id="mcp-probes" style="color: #a78bfa;">{{ stats.protocol_breakdown.get('mcp', 0) }}</div>
             </div>
-            <div class="stat-card" style="border-color: rgba(34, 197, 94, 0.4);">
+            <div class="stat-card clickable" style="border-color: rgba(34, 197, 94, 0.4);" onclick="filterByCard('text', 'tool_calls')">
                 <h3>Agentic (tool_calls)</h3>
                 <div class="stat-value" id="agentic-requests" style="color: #4ade80;">{{ stats.get('agentic_requests', 0) }}</div>
             </div>
-            <div class="stat-card critical" style="border-color: rgba(251, 191, 36, 0.6); background: rgba(251, 191, 36, 0.05);">
+            <div class="stat-card clickable critical" style="border-color: rgba(251, 191, 36, 0.6); background: rgba(251, 191, 36, 0.05);" onclick="filterByCard('text', 'canary')">
                 <h3>🎯 Canary Reuses</h3>
                 <div class="stat-value" id="canary-reuses" style="color: #fbbf24;">0</div>
             </div>
-            <div class="stat-card critical">
+            <div class="stat-card clickable critical" onclick="filterByCard('threat', 'critical')">
                 <h3>High/Critical Threats</h3>
                 <div class="stat-value" id="critical-threats">{{ stats.get('critical_threats', 0) }}</div>
             </div>
@@ -596,6 +863,18 @@
                     </div>
                 </div>
 
+                <div class="panel" style="margin-bottom: 20px;">
+                    <div class="panel-header">
+                        <h2>24h Attack Activity</h2>
+                        <span style="font-size:12px;color:var(--text-secondary);">requests per hour</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="chart-container">
+                            <canvas id="timeline-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="panel">
                     <div class="panel-header">
                         <h2>Live Request Feed</h2>
@@ -603,6 +882,35 @@
                             <span class="refresh-dot"></span>
                             Real-time push | Click request for AI analysis
                         </span>
+                    </div>
+                    <div class="filter-bar">
+                        <input type="text" id="filter-input" class="filter-input" placeholder="Filter by IP, path, keyword…" oninput="applyFilter()">
+                        <select id="filter-class" class="filter-select" onchange="applyFilter()">
+                            <option value="">All classifications</option>
+                            <option value="scanner">scanner</option>
+                            <option value="credential_stuffer">credential_stuffer</option>
+                            <option value="prompt_harvester">prompt_harvester</option>
+                            <option value="data_exfil">data_exfil</option>
+                            <option value="recon">recon</option>
+                            <option value="researcher">researcher</option>
+                            <option value="human">human</option>
+                        </select>
+                        <select id="filter-threat" class="filter-select" onchange="applyFilter()">
+                            <option value="">All threats</option>
+                            <option value="critical">critical</option>
+                            <option value="high">high</option>
+                            <option value="medium">medium</option>
+                            <option value="low">low</option>
+                        </select>
+                        <select id="filter-proto" class="filter-select" onchange="applyFilter()">
+                            <option value="">All protocols</option>
+                            <option value="openai_api">openai_api</option>
+                            <option value="anthropic_api">anthropic_api</option>
+                            <option value="mcp">mcp</option>
+                            <option value="web">web</option>
+                        </select>
+                        <button class="filter-clear" onclick="clearFilter()">Clear</button>
+                        <span class="filter-count" id="filter-count"></span>
                     </div>
                     <div class="request-feed" id="request-feed">
                         {% for req in recent_requests %}
@@ -628,10 +936,54 @@
                                 {% if req.framework %}<span class="badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4);">{{ req.framework }}</span>{% endif %}
                                 {% if req.threat_level %}<span class="threat-badge {{ req.threat_level }}">{{ req.threat_level }}</span>{% endif %}
                             </div>
+                            {% if req.owasp_categories or req.mitre_atlas_tags or req.cwe_ids %}
+                            <div class="taxonomy-inline">
+                                {% for tag in (req.owasp_categories or []) %}
+                                <span class="owasp-tag">{{ tag }}</span>
+                                {% endfor %}
+                                {% for tag in (req.mitre_atlas_tags or []) %}
+                                <span class="mitre-tag">{{ tag }}</span>
+                                {% endfor %}
+                                {% for tag in (req.cwe_ids or []) %}
+                                <span class="cwe-tag">{{ tag }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                             <div class="ai-analysis" id="analysis-{{ req.id }}">
                                 {% if req.trap_hit %}
                                 <div class="trap-hit-banner">⚡ TRAP HIT — {{ req.trap_type or 'unknown' }} trap triggered{% if req.response_delta_ms %} · {{ req.response_delta_ms|int }}ms response delta{% endif %}</div>
                                 {% endif %}
+
+                                <!-- Detail rows: port, location, session, rate, timing, classification -->
+                                <div class="detail-rows">
+                                    <span class="detail-label">Source</span>
+                                    <span class="detail-value">{{ req.source_ip }}{% if req.source_port %}:{{ req.source_port }}{% endif %}</span>
+                                    {% if req.city or req.country_name %}
+                                    <span class="detail-label">Location</span>
+                                    <span class="detail-value">{% if req.country_code %}{{ req.country_code | country_flag }} {% endif %}{% if req.city %}{{ req.city }}, {% endif %}{{ req.country_name or '' }}</span>
+                                    {% endif %}
+                                    {% if req.session_fingerprint %}
+                                    <span class="detail-label">Fingerprint</span>
+                                    <span class="detail-value" style="color:var(--text-secondary);">{{ req.session_fingerprint[:20] }}…</span>
+                                    {% endif %}
+                                    {% if req.response_time_ms is not none %}
+                                    <span class="detail-label">Response</span>
+                                    <span class="detail-value">{{ "%.1f"|format(req.response_time_ms) }} ms</span>
+                                    {% endif %}
+                                    {% if req.classification %}
+                                    <span class="detail-label">Classification</span>
+                                    <span class="detail-value">{{ req.classification | upper }}{% if req.classification_confidence %} ({{ (req.classification_confidence * 100)|int }}% confidence){% endif %}</span>
+                                    {% endif %}
+                                    {% if req.attack_chain_id %}
+                                    <span class="detail-label">Attack Chain</span>
+                                    <span class="detail-value" style="color:var(--text-secondary);">{{ req.attack_chain_id[:20] }}{% if req.attack_stage %} ({{ req.attack_stage }}){% endif %}</span>
+                                    {% endif %}
+                                    {% if req.response_delta_ms %}
+                                    <span class="detail-label">Agent Signal</span>
+                                    <span class="detail-value" style="color:#a78bfa;">Δ{{ req.response_delta_ms|int }}ms</span>
+                                    {% endif %}
+                                </div>
+
                                 {% if req.ai_summary %}
                                 <div class="ai-analysis-header">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
@@ -668,6 +1020,39 @@
                                 </div>
                                 <div class="ai-summary" style="color: var(--text-secondary);">Analysis pending or not available...</div>
                                 {% endif %}
+
+                                <!-- OWASP / MITRE ATLAS / CWE taxonomy -->
+                                {% if req.owasp_categories %}
+                                <div class="taxonomy-section">
+                                    <h4>OWASP</h4>
+                                    <div class="taxonomy-tags">
+                                    {% for tag in req.owasp_categories %}
+                                        <span class="owasp-tag">{{ tag }}</span>
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% if req.mitre_atlas_tags %}
+                                <div class="taxonomy-section">
+                                    <h4>MITRE ATLAS</h4>
+                                    <div class="taxonomy-tags">
+                                    {% for tag in req.mitre_atlas_tags %}
+                                        <span class="mitre-tag">{{ tag }}</span>
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% if req.cwe_ids %}
+                                <div class="taxonomy-section">
+                                    <h4>CWE</h4>
+                                    <div class="taxonomy-tags">
+                                    {% for cwe in req.cwe_ids %}
+                                        <span class="cwe-tag">{{ cwe }}</span>
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+
                                 <div class="observables-grid">
                                     <div class="obs-item">ip: <span>{{ req.source_ip }}</span></div>
                                     {% if req.model_requested %}<div class="obs-item">model: <span>{{ req.model_requested }}</span></div>{% endif %}
@@ -675,8 +1060,22 @@
                                     {% if req.framework %}<div class="obs-item">framework: <span>{{ req.framework }}</span></div>{% endif %}
                                     {% if req.attack_stage %}<div class="obs-item">stage: <span>{{ req.attack_stage }}</span></div>{% endif %}
                                     {% if req.asn_org %}<div class="obs-item">asn: <span>{{ req.asn_org[:30] }}</span></div>{% endif %}
-                                    {% if req.response_delta_ms %}<div class="obs-item">delta: <span>{{ req.response_delta_ms|int }}ms</span></div>{% endif %}
                                     {% if req.user_agent %}<div class="obs-item" style="grid-column: 1/-1;">ua: <span>{{ req.user_agent[:80] }}</span></div>{% endif %}
+                                    {% if req.notes %}<div class="obs-item" style="grid-column: 1/-1;">note: <span>{{ req.notes }}</span></div>{% endif %}
+                                </div>
+
+                                <!-- Action bar: flag, note, delete -->
+                                <div class="action-bar" onclick="event.stopPropagation()">
+                                    <button class="action-btn {% if req.is_flagged %}flagged{% endif %}"
+                                            id="flag-btn-{{ req.id }}"
+                                            onclick="toggleFlag({{ req.id }}, this)">
+                                        {% if req.is_flagged %}⚑ Flagged{% else %}⚐ Flag{% endif %}
+                                    </button>
+                                    <input type="text" class="note-input" id="note-{{ req.id }}"
+                                           placeholder="Add note…" value="{{ req.notes or '' }}"
+                                           onkeydown="if(event.key==='Enter') saveNote({{ req.id }})">
+                                    <button class="action-btn" onclick="saveNote({{ req.id }})">Save</button>
+                                    <button class="action-btn danger" onclick="confirmDelete({{ req.id }}, this.closest('.request-item'))">🗑 Delete</button>
                                 </div>
                             </div>
                         </div>
@@ -880,6 +1279,32 @@
                 ? `<div class="trap-hit-banner">⚡ TRAP HIT — ${esc(req.trap_type || 'unknown')} trap triggered${req.response_delta_ms ? ` · ${Math.round(req.response_delta_ms)}ms delta` : ''}</div>`
                 : '';
 
+            // Detail rows
+            const flagEmoji = (cc) => {
+                if (!cc || cc.length !== 2) return '';
+                return [...cc.toUpperCase()].map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)).join('') + ' ';
+            };
+            const detailRows = [
+                `<span class="detail-label">Source</span><span class="detail-value">${esc(req.source_ip)}${req.source_port ? ':' + req.source_port : ''}</span>`,
+                (req.city || req.country_name) ? `<span class="detail-label">Location</span><span class="detail-value">${flagEmoji(req.country_code)}${req.city ? esc(req.city) + ', ' : ''}${esc(req.country_name || '')}</span>` : '',
+                req.session_fingerprint ? `<span class="detail-label">Fingerprint</span><span class="detail-value" style="color:var(--text-secondary)">${esc(req.session_fingerprint.slice(0,20))}…</span>` : '',
+                req.response_time_ms != null ? `<span class="detail-label">Response</span><span class="detail-value">${req.response_time_ms.toFixed(1)} ms</span>` : '',
+                req.classification ? `<span class="detail-label">Classification</span><span class="detail-value">${esc(req.classification.toUpperCase())}${req.classification_confidence ? ` (${Math.round(req.classification_confidence*100)}% confidence)` : ''}</span>` : '',
+                req.attack_chain_id ? `<span class="detail-label">Attack Chain</span><span class="detail-value" style="color:var(--text-secondary)">${esc(req.attack_chain_id.slice(0,20))}${req.attack_stage ? ' (' + esc(req.attack_stage) + ')' : ''}</span>` : '',
+                req.response_delta_ms ? `<span class="detail-label">Agent Signal</span><span class="detail-value" style="color:#a78bfa">Δ${Math.round(req.response_delta_ms)}ms</span>` : '',
+            ].filter(Boolean).join('');
+
+            // OWASP / MITRE / CWE taxonomy
+            const owaspTags = (req.owasp_categories && req.owasp_categories.length)
+                ? `<div class="taxonomy-section"><h4>OWASP</h4><div class="taxonomy-tags">${req.owasp_categories.map(t => `<span class="owasp-tag">${esc(t)}</span>`).join('')}</div></div>`
+                : '';
+            const mitreTags = (req.mitre_atlas_tags && req.mitre_atlas_tags.length)
+                ? `<div class="taxonomy-section"><h4>MITRE ATLAS</h4><div class="taxonomy-tags">${req.mitre_atlas_tags.map(t => `<span class="mitre-tag">${esc(t)}</span>`).join('')}</div></div>`
+                : '';
+            const cweTags = (req.cwe_ids && req.cwe_ids.length)
+                ? `<div class="taxonomy-section"><h4>CWE</h4><div class="taxonomy-tags">${req.cwe_ids.map(t => `<span class="cwe-tag">${esc(t)}</span>`).join('')}</div></div>`
+                : '';
+
             const analysisBody = req.ai_summary
                 ? `<div class="ai-analysis-header">
                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
@@ -904,9 +1329,19 @@
                 req.framework ? `<div class="obs-item">framework: <span>${esc(req.framework)}</span></div>` : '',
                 req.attack_stage ? `<div class="obs-item">stage: <span>${esc(req.attack_stage)}</span></div>` : '',
                 req.asn_org ? `<div class="obs-item">asn: <span>${esc(req.asn_org.slice(0,30))}</span></div>` : '',
-                req.response_delta_ms ? `<div class="obs-item">delta: <span>${Math.round(req.response_delta_ms)}ms</span></div>` : '',
                 req.user_agent ? `<div class="obs-item" style="grid-column:1/-1">ua: <span>${esc(req.user_agent.slice(0,80))}</span></div>` : '',
+                req.notes ? `<div class="obs-item" style="grid-column:1/-1">note: <span>${esc(req.notes)}</span></div>` : '',
             ].filter(Boolean).join('');
+
+            const flagBtnClass = req.is_flagged ? 'action-btn flagged' : 'action-btn';
+            const flagBtnText = req.is_flagged ? '⚑ Flagged' : '⚐ Flag';
+            const actionBar = `
+                <div class="action-bar" onclick="event.stopPropagation()">
+                    <button class="${flagBtnClass}" id="flag-btn-${req.id}" onclick="toggleFlag(${req.id}, this)">${flagBtnText}</button>
+                    <input type="text" class="note-input" id="note-${req.id}" placeholder="Add note…" value="${esc(req.notes || '')}" onkeydown="if(event.key==='Enter') saveNote(${req.id})">
+                    <button class="action-btn" onclick="saveNote(${req.id})">Save</button>
+                    <button class="action-btn danger" onclick="confirmDelete(${req.id}, this.closest('.request-item'))">🗑 Delete</button>
+                </div>`;
 
             return `
                 <div class="request-item" data-id="${req.id}" onclick="toggleAnalysis(this)">
@@ -931,10 +1366,19 @@
                         ${req.framework ? `<span class="badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4)">${esc(req.framework)}</span>` : ''}
                         ${req.threat_level ? `<span class="threat-badge ${esc(req.threat_level)}">${esc(req.threat_level)}</span>` : ''}
                     </div>
+                    ${(req.owasp_categories?.length || req.mitre_atlas_tags?.length || req.cwe_ids?.length) ? `
+                    <div class="taxonomy-inline">
+                        ${(req.owasp_categories||[]).map(t=>`<span class="owasp-tag">${esc(t)}</span>`).join('')}
+                        ${(req.mitre_atlas_tags||[]).map(t=>`<span class="mitre-tag">${esc(t)}</span>`).join('')}
+                        ${(req.cwe_ids||[]).map(t=>`<span class="cwe-tag">${esc(t)}</span>`).join('')}
+                    </div>` : ''}
                     <div class="ai-analysis" id="analysis-${req.id}">
                         ${trapBanner}
+                        <div class="detail-rows">${detailRows}</div>
                         ${analysisBody}
+                        ${owaspTags}${mitreTags}${cweTags}
                         <div class="observables-grid">${observables}</div>
+                        ${actionBar}
                     </div>
                 </div>`;
         }
@@ -1097,7 +1541,7 @@
 
         function connectWS() {
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            ws = new WebSocket(`${proto}://${location.host}/ws/feed`);
+            ws = new WebSocket(`${proto}://${location.host}{{ admin_path }}/ws/feed`);
 
             ws.onopen = () => {
                 wsAlive = true;
@@ -1241,10 +1685,255 @@
                 const feed = document.getElementById('request-feed');
                 feed.innerHTML = requests.map(req => renderRequestItem(req)).join('');
                 requests.forEach(req => { feedRows[req.id] = req; });
+                applyFilter();
             } catch(e) {}
         }
 
+        // ── 24h Activity Chart ─────────────────────────────────────────────
+        let timelineChart = null;
+        const timelineHourlyCounts = {};
+
+        function initTimelineChart(data) {
+            const ctx = document.getElementById('timeline-chart').getContext('2d');
+
+            const labels = data.map(d => {
+                const h = parseInt(d.hour.split(' ')[1].split(':')[0]);
+                return h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`;
+            });
+            const counts = data.map(d => d.count);
+
+            // Store for live updates
+            data.forEach((d, i) => { timelineHourlyCounts[d.hour] = i; });
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+            gradient.addColorStop(0, 'rgba(233, 69, 96, 0.35)');
+            gradient.addColorStop(1, 'rgba(233, 69, 96, 0.02)');
+
+            timelineChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: counts.map(c =>
+                            c === 0 ? 'rgba(100,100,150,0.15)' :
+                            c > 50  ? 'rgba(220,38,38,0.85)' :
+                            c > 20  ? 'rgba(233,69,96,0.7)' :
+                                      'rgba(233,69,96,0.45)'
+                        ),
+                        borderColor: 'transparent',
+                        borderRadius: 3,
+                        borderSkipped: false,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 400 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15,15,26,0.95)',
+                            borderColor: 'rgba(100,100,150,0.3)',
+                            borderWidth: 1,
+                            titleColor: '#e4e4e4',
+                            bodyColor: '#888',
+                            callbacks: {
+                                title: (items) => `Hour: ${data[items[0].dataIndex]?.hour || ''}`,
+                                label: (item) => ` ${item.raw} request${item.raw !== 1 ? 's' : ''}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            border: { display: false },
+                            ticks: {
+                                color: '#666',
+                                font: { size: 10 },
+                                maxRotation: 0,
+                                maxTicksLimit: 12,
+                            },
+                        },
+                        y: {
+                            grid: { color: 'rgba(100,100,150,0.08)' },
+                            border: { display: false },
+                            ticks: { color: '#666', font: { size: 10 }, maxTicksLimit: 4 },
+                        },
+                    },
+                },
+            });
+        }
+
+        async function loadTimelineChart() {
+            try {
+                const data = await fetch(ADMIN_PATH + '/api/timeline').then(r => r.json());
+                initTimelineChart(data);
+            } catch(e) { console.error('Chart load failed', e); }
+        }
+
+        function bumpTimelineCurrentHour() {
+            if (!timelineChart) return;
+            // Bump the last bar (current hour)
+            const ds = timelineChart.data.datasets[0];
+            const last = ds.data.length - 1;
+            ds.data[last] = (ds.data[last] || 0) + 1;
+            // Re-colour the bar
+            const v = ds.data[last];
+            ds.backgroundColor[last] =
+                v > 50 ? 'rgba(220,38,38,0.85)' :
+                v > 20 ? 'rgba(233,69,96,0.7)' :
+                         'rgba(233,69,96,0.45)';
+            timelineChart.update('none');
+        }
+
+        // Patch handleFeedEvent to also bump the chart
+        const _origHandleFeedEvent = handleFeedEvent;
+        handleFeedEvent = function(msg) {
+            _origHandleFeedEvent(msg);
+            if (msg.type === 'request_new') bumpTimelineCurrentHour();
+        };
+
+        // ── Feed filter ────────────────────────────────────────────────────
+        function applyFilter() {
+            const text  = (document.getElementById('filter-input')?.value || '').toLowerCase();
+            const cls   = (document.getElementById('filter-class')?.value || '').toLowerCase();
+            const threat= (document.getElementById('filter-threat')?.value || '').toLowerCase();
+            const proto = (document.getElementById('filter-proto')?.value || '').toLowerCase();
+
+            let visible = 0;
+            document.querySelectorAll('#request-feed .request-item').forEach(item => {
+                const content = item.textContent.toLowerCase();
+                const show =
+                    (!text   || content.includes(text))   &&
+                    (!cls    || content.includes(cls))     &&
+                    (!threat || content.includes(threat))  &&
+                    (!proto  || content.includes(proto));
+                item.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            const total = document.querySelectorAll('#request-feed .request-item').length;
+            const countEl = document.getElementById('filter-count');
+            if (countEl) {
+                countEl.textContent = (text || cls || threat || proto)
+                    ? `${visible} / ${total} shown`
+                    : `${total} requests`;
+            }
+        }
+
+        function clearFilter() {
+            const fi = document.getElementById('filter-input');
+            const fc = document.getElementById('filter-class');
+            const ft = document.getElementById('filter-threat');
+            const fp = document.getElementById('filter-proto');
+            if (fi) fi.value = '';
+            if (fc) fc.value = '';
+            if (ft) ft.value = '';
+            if (fp) fp.value = '';
+            applyFilter();
+        }
+
+        // Re-apply filter after new rows are prepended
+        const _origPrepend = prependRequestRow;
+        prependRequestRow = function(req) {
+            _origPrepend(req);
+            applyFilter();
+        };
+
+        // ── Stat card click-through filter ───────────────────────────────
+        function filterByCard(type, value) {
+            const fi = document.getElementById('filter-input');
+            const fc = document.getElementById('filter-class');
+            const ft = document.getElementById('filter-threat');
+            const fp = document.getElementById('filter-proto');
+
+            // Reset all
+            if (fi) fi.value = '';
+            if (fc) fc.value = '';
+            if (ft) ft.value = '';
+            if (fp) fp.value = '';
+
+            if (type === 'clear') {
+                // nothing more to do — all cleared
+            } else if (type === 'class' && fc) {
+                fc.value = value;
+            } else if (type === 'proto' && fp) {
+                fp.value = value;
+            } else if (type === 'threat' && ft) {
+                ft.value = value;
+            } else if (type === 'text' && fi) {
+                fi.value = value;
+            }
+            applyFilter();
+            document.getElementById('request-feed').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // ── Delete request ────────────────────────────────────────────────
+        let _deleteTarget = null;
+
+        function confirmDelete(id, el) {
+            _deleteTarget = { id, el };
+            document.getElementById('delete-modal').classList.add('open');
+        }
+
+        async function executeDelete() {
+            document.getElementById('delete-modal').classList.remove('open');
+            if (!_deleteTarget) return;
+            const { id, el } = _deleteTarget;
+            _deleteTarget = null;
+            try {
+                const res = await fetch(`${ADMIN_PATH}/api/requests/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    el.classList.add('deleting');
+                    setTimeout(() => el.remove(), 320);
+                    delete feedRows[id];
+                    applyFilter();
+                }
+            } catch(e) { console.error('Delete failed', e); }
+        }
+
+        // Close modal on overlay click
+        document.getElementById('delete-modal').addEventListener('click', function(e) {
+            if (e.target === this) this.classList.remove('open');
+        });
+
+        // ── Flag / unflag a request ───────────────────────────────────────
+        async function toggleFlag(id, btn) {
+            const isFlagged = btn.classList.contains('flagged');
+            try {
+                const res = await fetch(`${ADMIN_PATH}/api/requests/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_flagged: !isFlagged }),
+                });
+                if (res.ok) {
+                    btn.classList.toggle('flagged');
+                    btn.textContent = isFlagged ? '⚐ Flag' : '⚑ Flagged';
+                    // Update in-memory row
+                    if (feedRows[id]) feedRows[id].is_flagged = !isFlagged;
+                }
+            } catch(e) { console.error('Flag failed', e); }
+        }
+
+        // ── Save note on a request ────────────────────────────────────────
+        async function saveNote(id) {
+            const input = document.getElementById(`note-${id}`);
+            if (!input) return;
+            try {
+                await fetch(`${ADMIN_PATH}/api/requests/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes: input.value }),
+                });
+                if (feedRows[id]) feedRows[id].notes = input.value;
+                // Brief visual confirmation
+                input.style.borderColor = 'var(--success)';
+                setTimeout(() => input.style.borderColor = '', 1200);
+            } catch(e) { console.error('Save note failed', e); }
+        }
+
         loadMapData();
+        loadTimelineChart();
         refreshData();    // initial full load
         connectWS();      // start real-time feed
     </script>

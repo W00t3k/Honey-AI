@@ -82,6 +82,12 @@ class HoneypotConfig:
     response_delay_min_ms: int = 80
     response_delay_max_ms: int = 300
 
+    # SSH honeypot
+    ssh_honeypot_enabled: bool = False
+    ssh_listen_host: str = "0.0.0.0"
+    ssh_listen_port: int = 2222
+    ssh_host_key_path: str = "./ssh_host_key"
+
     def to_dict(self) -> dict:
         """Convert to dictionary, hiding sensitive fields."""
         d = asdict(self)
@@ -98,7 +104,7 @@ class HoneypotConfig:
         """Convert to dictionary without sensitive values."""
         d = asdict(self)
         sensitive_keys = ["groq_api_key", "slack_webhook_url", "discord_webhook_url",
-                         "webhook_url", "admin_password", "jwt_secret", "maxmind_license_key"]
+                         "webhook_url", "smtp_password", "admin_password", "jwt_secret", "maxmind_license_key"]
         for key in sensitive_keys:
             if d.get(key):
                 d[key] = "••••••••" if d[key] else ""
@@ -124,6 +130,10 @@ class ConfigService:
         self.config.jwt_secret = os.getenv("JWT_SECRET", "")
         self.config.geoip_db_path = os.getenv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb")
         self.config.maxmind_license_key = os.getenv("MAXMIND_LICENSE_KEY", "")
+        self.config.ssh_honeypot_enabled = os.getenv("SSH_HONEYPOT_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+        self.config.ssh_listen_host = os.getenv("SSH_LISTEN_HOST", "0.0.0.0")
+        self.config.ssh_listen_port = _coerce_int(os.getenv("SSH_LISTEN_PORT", 2222), 2222, minimum=1, maximum=65535)
+        self.config.ssh_host_key_path = os.getenv("SSH_HOST_KEY_PATH", "./ssh_host_key")
 
         # Parse additional ports from env
         ports_env = os.getenv("ADDITIONAL_PORTS", "")
@@ -209,10 +219,23 @@ class ConfigService:
 
     def update(self, **kwargs) -> bool:
         """Update configuration values."""
+        masked_secret_values = {"••••••••", "***"}
+        protected_secret_keys = {
+            "groq_api_key",
+            "slack_webhook_url",
+            "discord_webhook_url",
+            "webhook_url",
+            "smtp_password",
+            "admin_password",
+            "jwt_secret",
+            "maxmind_license_key",
+        }
         for key, value in kwargs.items():
             if hasattr(self.config, key):
-                # Avoid accidentally blanking core admin auth fields through partial updates.
-                if value == "" and key in ["admin_password", "jwt_secret"]:
+                # Blank secret fields from the UI mean "leave the current value unchanged".
+                if value == "" and key in protected_secret_keys:
+                    continue
+                if key in protected_secret_keys and value in masked_secret_values:
                     continue
                 setattr(self.config, key, value)
         self._normalize_config()
@@ -247,6 +270,7 @@ class ConfigService:
         cfg.max_db_size_mb = _coerce_int(cfg.max_db_size_mb, 0, minimum=0, maximum=1024 * 1024)
         cfg.response_delay_min_ms = _coerce_int(cfg.response_delay_min_ms, 80, minimum=0, maximum=15000)
         cfg.response_delay_max_ms = _coerce_int(cfg.response_delay_max_ms, 300, minimum=0, maximum=15000)
+        cfg.ssh_listen_port = _coerce_int(cfg.ssh_listen_port, 2222, minimum=1, maximum=65535)
         if cfg.response_delay_max_ms < cfg.response_delay_min_ms:
             cfg.response_delay_max_ms = cfg.response_delay_min_ms
 

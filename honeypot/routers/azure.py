@@ -78,9 +78,14 @@ async def azure_chat_completions(deployment: str, request: Request):
 
     responder = get_responder()
     messages = body_parsed.get("messages") if body_parsed else None
-    response_data = responder.chat_completion(
+    source_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else "unknown"
+    )
+    response_data = await responder.chat_completion_async(
         model=deployment,
         messages=messages,
+        source_ip=source_ip,
+        protocol="azure_openai",
     )
     # Azure returns deployment name as model, not underlying model name
     response_data["model"] = deployment
@@ -116,7 +121,15 @@ async def azure_extensions_chat(deployment: str, request: Request):
 
     responder = get_responder()
     messages = body_parsed.get("messages") if body_parsed else None
-    inner = responder.chat_completion(model=deployment, messages=messages)
+    source_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else "unknown"
+    )
+    inner = await responder.chat_completion_async(
+        model=deployment,
+        messages=messages,
+        source_ip=source_ip,
+        protocol="azure_openai",
+    )
     inner["model"] = deployment
 
     # Azure On-Your-Data wraps the response with a context citation block
@@ -152,7 +165,15 @@ async def azure_completions(deployment: str, request: Request):
 
     responder = get_responder()
     prompt = body_parsed.get("prompt", "") if body_parsed else ""
-    response_data = responder.completion(model=deployment, prompt=prompt)
+    source_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else "unknown"
+    )
+    response_data = await responder.completion_async(
+        model=deployment,
+        prompt=prompt,
+        source_ip=source_ip,
+        protocol="azure_openai",
+    )
     response_data["model"] = deployment
     response_body = json.dumps(response_data)
 

@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -78,6 +78,10 @@ SCHEMA_MIGRATIONS = {
     6: [
         # Groq LLM actor classification: human | bot | llm_agent | researcher | unknown
         ("ai_actor_type", "VARCHAR(20)"),
+    ],
+    7: [
+        # CWE weakness mappings (e.g. CWE-74, CWE-200)
+        ("cwe_ids", "JSON"),
     ],
 }
 
@@ -153,6 +157,7 @@ class Request(Base):
     realtime_session_id = Column(String(64), nullable=True, index=True)
     voice_profile = Column(String(50), nullable=True)
     voice_metadata = Column(JSON, nullable=True)
+    cwe_ids = Column(JSON, nullable=True)
 
     # Metadata
     is_flagged = Column(Boolean, default=False, index=True)
@@ -223,6 +228,7 @@ class Request(Base):
             "realtime_session_id": self.realtime_session_id,
             "voice_profile": self.voice_profile,
             "voice_metadata": self.voice_metadata,
+            "cwe_ids": self.cwe_ids,
             "is_flagged": self.is_flagged,
             "notes": self.notes,
             "threat_level": self.threat_level,
@@ -504,6 +510,31 @@ class Database:
                 select(Request).where(Request.id == request_id)
             )
             return result.scalar_one_or_none()
+
+    async def delete_request(self, request_id: int) -> bool:
+        """Delete a request by ID. Returns True if deleted, False if not found."""
+        async with self.async_session() as session:
+            result = await session.execute(select(Request).where(Request.id == request_id))
+            req = result.scalar_one_or_none()
+            if not req:
+                return False
+            await session.delete(req)
+            await session.commit()
+            return True
+
+    async def update_request_meta(self, request_id: int, data: dict) -> bool:
+        """Update is_flagged and/or notes on a request. Returns True if found."""
+        allowed = {"is_flagged", "notes"}
+        async with self.async_session() as session:
+            result = await session.execute(select(Request).where(Request.id == request_id))
+            req = result.scalar_one_or_none()
+            if not req:
+                return False
+            for field_name, value in data.items():
+                if field_name in allowed:
+                    setattr(req, field_name, value)
+            await session.commit()
+            return True
 
     async def export_requests(
         self,

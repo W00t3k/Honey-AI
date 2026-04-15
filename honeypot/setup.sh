@@ -4,7 +4,7 @@
 #
 # This script sets up the honeypot environment:
 # - Creates Python virtual environment
-# - Installs dependencies
+# - Installs dependencies (including asyncssh for the optional SSH honeypot)
 # - Downloads MaxMind GeoLite2 database
 # - Creates configuration from template
 #
@@ -55,6 +55,7 @@ echo -e "\n${YELLOW}Installing dependencies...${NC}"
 pip install -r requirements.txt
 
 echo -e "${GREEN}Dependencies installed${NC}"
+echo "Included optional SSH honeypot dependency: asyncssh"
 
 # Create .env from template if not exists
 echo -e "\n${YELLOW}Setting up configuration...${NC}"
@@ -162,6 +163,7 @@ echo "3. Test locally:"
 echo "   source venv/bin/activate"
 echo "   python main.py"
 echo "   # main.py now opens PORT plus any configured ADDITIONAL_PORTS"
+echo "   # set SSH_HONEYPOT_ENABLED=true to enable the SSH listener on port 2222"
 echo ""
 echo "4. Deploy to production:"
 echo "   - Copy honeypot.service to /etc/systemd/system/"

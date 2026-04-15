@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from services.deception import get_company_profile
+from services.groq_chat import API_DECEPTION_PROMPT, get_groq_chat
+from services.session_store import get_session_store
 
 
 def generate_completion_id() -> str:
@@ -245,11 +247,28 @@ class ResponseGenerator:
         messages: Optional[list] = None,
         stream: bool = False,
         max_tokens: Optional[int] = None,
+        inject_traps: bool = True,
         **kwargs,
     ) -> dict:
         """Generate a fake chat completion response."""
         # Determine response based on content
         content = self._select_response(messages)
+
+        # Inject hidden agent-detection traps into the response body.
+        # Autonomous LLM agents that process the raw completion text will see
+        # the embedded instructions and call back to /v1/verify/{token}, which
+        # is already monitored by agent_trap.py.
+        trap_token: Optional[str] = None
+        if inject_traps:
+            try:
+                from services.trap_injector import inject_agent_traps, inject_system_prompt_stealer
+                content, trap_token = inject_agent_traps(content)
+                # 20 % chance: also plant the system-prompt-stealing trap
+                if random.random() < 0.20:
+                    content, _ = inject_system_prompt_stealer(content)
+            except Exception:
+                pass  # Never break real responses due to trap injection failure
+
         prompt_tokens = self._estimate_tokens(messages)
         completion_tokens = self._estimate_tokens([{"content": content}])
 
@@ -279,6 +298,67 @@ class ResponseGenerator:
 
         return response
 
+    async def chat_completion_async(
+        self,
+        model: str = "gpt-4o",
+        messages: Optional[list] = None,
+        stream: bool = False,
+        max_tokens: Optional[int] = None,
+        inject_traps: bool = True,
+        source_ip: str = "unknown",
+        protocol: str = "openai_api",
+        **kwargs,
+    ) -> dict:
+        """Generate a chat completion, using Groq when configured."""
+        content = await self._generate_dynamic_content(
+            messages=messages,
+            max_tokens=max_tokens,
+            source_ip=source_ip,
+            protocol=protocol,
+        )
+
+        trap_token: Optional[str] = None
+        if inject_traps:
+            try:
+                from services.trap_injector import inject_agent_traps, inject_system_prompt_stealer
+                content, trap_token = inject_agent_traps(content)
+                if random.random() < 0.20:
+                    content, _ = inject_system_prompt_stealer(content)
+            except Exception:
+                pass
+
+        finish_reason = "stop"
+        content, finish_reason = self._apply_response_variability(content, max_tokens)
+
+        prompt_tokens = self._estimate_tokens(messages)
+        completion_tokens = self._estimate_tokens([{"content": content}])
+        get_session_store().record_chat_turn(source_ip, messages, content, protocol=protocol)
+
+        response = {
+            "id": generate_completion_id(),
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": content,
+                    },
+                    "logprobs": None,
+                    "finish_reason": finish_reason,
+                }
+            ],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+            "system_fingerprint": f"fp_{uuid.uuid4().hex[:10]}",
+        }
+        return response
+
     def completion(
         self,
         model: str = "gpt-3.5-turbo-instruct",
@@ -302,6 +382,48 @@ class ResponseGenerator:
                     "index": 0,
                     "logprobs": None,
                     "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": int(prompt_tokens),
+                "completion_tokens": int(completion_tokens),
+                "total_tokens": int(prompt_tokens + completion_tokens),
+            },
+        }
+
+    async def completion_async(
+        self,
+        model: str = "gpt-3.5-turbo-instruct",
+        prompt: str = "",
+        max_tokens: Optional[int] = None,
+        source_ip: str = "unknown",
+        protocol: str = "openai_api",
+        **kwargs,
+    ) -> dict:
+        """Generate a legacy completion using the dynamic chat backend when available."""
+        messages = [{"role": "user", "content": prompt}]
+        content = await self._generate_dynamic_content(
+            messages=messages,
+            max_tokens=max_tokens,
+            source_ip=source_ip,
+            protocol=protocol,
+        )
+        content, finish_reason = self._apply_response_variability(content, max_tokens)
+        prompt_tokens = len(prompt.split()) * 1.3
+        completion_tokens = len(content.split()) * 1.3
+        get_session_store().record_chat_turn(source_ip, messages, content, protocol=protocol)
+
+        return {
+            "id": f"cmpl-{uuid.uuid4().hex[:24]}",
+            "object": "text_completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "text": content,
+                    "index": 0,
+                    "logprobs": None,
+                    "finish_reason": finish_reason,
                 }
             ],
             "usage": {
@@ -679,6 +801,73 @@ class ResponseGenerator:
             return random.choice(REFUSAL_RESPONSES)
 
         return random.choice(CHAT_RESPONSES)
+
+    async def _generate_dynamic_content(
+        self,
+        messages: Optional[list],
+        max_tokens: Optional[int],
+        source_ip: str,
+        protocol: str,
+    ) -> str:
+        """Prefer Groq-backed responses but fall back to static templates."""
+        session_store = get_session_store()
+        prior_messages = session_store.get_chat_history(source_ip, protocol=protocol)
+        current_messages = self._normalize_messages(messages)
+        groq_messages = (prior_messages + current_messages)[-20:]
+
+        if groq_messages:
+            groq_content = await get_groq_chat().complete(
+                groq_messages,
+                system_prompt=API_DECEPTION_PROMPT,
+                temperature=random.uniform(0.55, 0.95),
+                max_tokens=max_tokens or random.randint(180, 640),
+            )
+            if groq_content:
+                return groq_content
+
+        return self._select_response(messages)
+
+    def _normalize_messages(self, messages: Optional[list]) -> list[dict]:
+        """Flatten provider-specific chat message bodies into OpenAI-style text turns."""
+        normalized: list[dict] = []
+        for msg in messages or []:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role", "")).strip() or "user"
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = "\n".join(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("text")
+                )
+            elif content is None:
+                content = ""
+            normalized.append({"role": role, "content": str(content)})
+        return normalized[-12:]
+
+    def _apply_response_variability(
+        self,
+        content: str,
+        max_tokens: Optional[int],
+    ) -> tuple[str, str]:
+        """Add small response-shape variations to reduce fingerprintability."""
+        if not content:
+            return random.choice(CHAT_RESPONSES), "stop"
+
+        finish_reason = "stop"
+        if len(content) > 120 and random.random() < 0.12:
+            cutoff = random.randint(70, max(80, len(content) - 20))
+            content = content[:cutoff].rstrip()
+            finish_reason = "length"
+
+        if max_tokens and max_tokens > 0:
+            approx_char_limit = max_tokens * 4
+            if len(content) > approx_char_limit:
+                content = content[:approx_char_limit].rstrip()
+                finish_reason = "length"
+
+        return content, finish_reason
 
     def _estimate_tokens(self, messages: Optional[list]) -> int:
         """Rough token estimation (4 chars per token approximation)."""

@@ -11,6 +11,7 @@ from .vectordb import router as vectordb_router
 from .azure import router as azure_router
 from .cohere import router as cohere_router
 from .recon import router as recon_router
+from .lures import router as lures_router
 from .admin import router as admin_router, set_database
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "azure_router",
     "cohere_router",
     "recon_router",
+    "lures_router",
     "admin_router",
     "set_database",
 ]

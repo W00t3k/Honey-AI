@@ -16,6 +16,7 @@ class TaxonomyMapping:
     attack_stage: Optional[str] = None
     owasp_categories: list[str] = field(default_factory=list)
     mitre_atlas_tags: list[str] = field(default_factory=list)
+    cwe_ids: list[str] = field(default_factory=list)
     voice_profile: Optional[str] = None
     voice_metadata: dict = field(default_factory=dict)
 
@@ -96,6 +97,8 @@ def map_taxonomy(
         mapping.owasp_categories.append("OWASP-Agentic:Tool Misuse / Excessive Agency")
     if classification == "data_exfil" or any(x in body for x in [".env", "/etc/passwd", "database://", "file://"]):
         mapping.owasp_categories.append("OWASP-LLM:Sensitive Information Disclosure")
+    if classification == "credential_stuffer" or (api_key and path.startswith("/v1/")):
+        mapping.owasp_categories.append("OWASP-API:Broken Authentication")
     if path in ("/api/chat", "/api/generate", "/v1/realtime"):
         mapping.owasp_categories.append("OWASP-Agentic:Agent Surface Expansion")
     if framework in {"cursor", "claude_desktop", "continue", "mcp_client"}:
@@ -131,6 +134,29 @@ def map_taxonomy(
 
     mapping.owasp_categories = sorted(set(mapping.owasp_categories))
     mapping.mitre_atlas_tags = sorted(set(mapping.mitre_atlas_tags))
+
+    # CWE mappings
+    if classification == "prompt_harvester" or "ignore previous" in body or "prompt" in body:
+        mapping.cwe_ids.append("CWE-74: Injection (Prompt Injection)")
+    if classification == "data_exfil" or any(x in body for x in [".env", "/etc/passwd", "database://"]):
+        mapping.cwe_ids.append("CWE-200: Exposure of Sensitive Information")
+    if classification == "credential_stuffer":
+        mapping.cwe_ids.append("CWE-287: Improper Authentication")
+        mapping.cwe_ids.append("CWE-732: Incorrect Permission Assignment for Critical Resource")
+    if api_key and path.startswith("/v1/"):
+        mapping.cwe_ids.append("CWE-284: Improper Access Control")
+    if has_tool_calls or path.startswith("/mcp"):
+        mapping.cwe_ids.append("CWE-668: Exposure of Resource to Wrong Sphere")
+    if framework in {"cursor", "claude_desktop", "continue", "mcp_client"}:
+        mapping.cwe_ids.append("CWE-610: Externally Controlled Reference to a Resource in Another Sphere")
+    if classification in ("scanner", "recon"):
+        mapping.cwe_ids.append("CWE-799: Improper Control of Interaction Frequency")
+    if agent_type == "llm_agent" or has_tool_calls:
+        mapping.cwe_ids.append("CWE-693: Protection Mechanism Failure")
+    if path == "/v1/realtime":
+        mapping.cwe_ids.append("CWE-319: Cleartext Transmission of Sensitive Information")
+    mapping.cwe_ids = sorted(set(mapping.cwe_ids))
+
     return mapping
 
 

@@ -215,7 +215,7 @@
                     <div class="input-group">
                         <input type="password" class="form-control mono" id="groq_api_key"
                                placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxx"
-                               value="{{ config.groq_api_key }}">
+                               value="">
                         <button class="btn btn-secondary btn-sm" onclick="testGroq()">Test</button>
                     </div>
                     <p class="form-hint">Free at <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a></p>
@@ -263,7 +263,7 @@
                     <div class="input-group">
                         <input type="password" class="form-control mono" id="slack_webhook_url"
                                placeholder="https://hooks.slack.com/services/xxx/xxx/xxx"
-                               value="{{ config.slack_webhook_url }}">
+                               value="">
                         <button class="btn btn-secondary btn-sm" onclick="testWebhook('slack')">Test</button>
                     </div>
                     <div class="test-result" id="slack-test-result"></div>
@@ -273,7 +273,7 @@
                     <div class="input-group">
                         <input type="password" class="form-control mono" id="discord_webhook_url"
                                placeholder="https://discord.com/api/webhooks/xxx/xxx"
-                               value="{{ config.discord_webhook_url }}">
+                               value="">
                         <button class="btn btn-secondary btn-sm" onclick="testWebhook('discord')">Test</button>
                     </div>
                     <div class="test-result" id="discord-test-result"></div>
@@ -283,7 +283,7 @@
                     <div class="input-group">
                         <input type="password" class="form-control mono" id="webhook_url"
                                placeholder="https://your-siem.com/api/ingest"
-                               value="{{ config.webhook_url }}">
+                               value="">
                         <button class="btn btn-secondary btn-sm" onclick="testWebhook('generic')">Test</button>
                     </div>
                     <div class="test-result" id="generic-test-result"></div>
@@ -336,7 +336,7 @@
                         </div>
                         <div class="form-group">
                             <label><strong>Password</strong></label>
-                            <input type="password" class="form-control" id="smtp_password" value="{{ config.smtp_password }}">
+                            <input type="password" class="form-control" id="smtp_password" value="">
                         </div>
                     </div>
                     <div class="form-row">
@@ -369,7 +369,7 @@
                     <div class="input-group">
                         <input type="password" class="form-control mono" id="maxmind_license_key"
                                placeholder="Your MaxMind license key"
-                               value="{{ config.maxmind_license_key }}">
+                               value="">
                         <button class="btn btn-success btn-sm" onclick="downloadGeoIP()">📥 Download DB</button>
                     </div>
                     <p class="form-hint">Free at <a href="https://www.maxmind.com/en/geolite2/signup" target="_blank">maxmind.com</a></p>
@@ -511,6 +511,16 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
+                        <label><strong>Fake Company Name</strong></label>
+                        <input type="text" class="form-control" id="fake_company_name" value="{{ config.fake_company_name }}" placeholder="Company Corp">
+                    </div>
+                    <div class="form-group">
+                        <label><strong>Fake Company Domain</strong></label>
+                        <input type="text" class="form-control mono" id="fake_company_domain" value="{{ config.fake_company_domain }}" placeholder="company.internal">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label><strong>Min Response Delay (ms)</strong></label>
                         <input type="number" class="form-control" id="response_delay_min_ms" value="{{ config.response_delay_min_ms }}" min="0">
                     </div>
@@ -520,6 +530,41 @@
                     </div>
                 </div>
                 <p class="form-hint">Random delay between min-max to prevent timing fingerprinting</p>
+            </div>
+        </div>
+
+        <!-- SSH Honeypot -->
+        <div class="section">
+            <div class="section-header">
+                <span class="icon">🛜</span>
+                <h2>SSH Honeypot</h2>
+            </div>
+            <div class="section-body">
+                <div class="switch-group">
+                    <div class="switch-label">
+                        <strong>Enable SSH Listener</strong>
+                        <span>Starts the mock SSH service on the configured port after restart</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="ssh_honeypot_enabled" {{ 'checked' if config.ssh_honeypot_enabled }}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-row" style="margin-top: 15px;">
+                    <div class="form-group">
+                        <label><strong>Listen Host</strong></label>
+                        <input type="text" class="form-control mono" id="ssh_listen_host" value="{{ config.ssh_listen_host }}" placeholder="0.0.0.0">
+                    </div>
+                    <div class="form-group">
+                        <label><strong>Listen Port</strong></label>
+                        <input type="number" class="form-control" id="ssh_listen_port" value="{{ config.ssh_listen_port or 2222 }}" min="1" max="65535">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label><strong>Host Key Path</strong></label>
+                    <input type="text" class="form-control mono" id="ssh_host_key_path" value="{{ config.ssh_host_key_path }}" placeholder="./ssh_host_key">
+                </div>
+                <p class="form-hint">Restart required after changing SSH settings. Use `2222` unless you explicitly want a privileged port.</p>
             </div>
         </div>
     </div>
@@ -589,6 +634,11 @@
             document.getElementById('canary-list').innerHTML = canaryTokens.map(token =>
                 `<span class="tag">${token.label}: ${token.token.substring(0, 18)}...<span class="remove" onclick="removeCanary('${token.id}')">×</span></span>`
             ).join('');
+        }
+
+        function readSecretValue(id) {
+            const input = document.getElementById(id);
+            return input.value.trim();
         }
 
         async function testGroq() {
@@ -679,23 +729,23 @@
 
         async function saveAll() {
             const config = {
-                groq_api_key: document.getElementById('groq_api_key').value,
+                groq_api_key: readSecretValue('groq_api_key'),
                 groq_model: document.getElementById('groq_model').value,
                 groq_chat_model: document.getElementById('groq_chat_model').value,
                 groq_enabled: document.getElementById('groq_enabled').checked,
-                slack_webhook_url: document.getElementById('slack_webhook_url').value,
-                discord_webhook_url: document.getElementById('discord_webhook_url').value,
-                webhook_url: document.getElementById('webhook_url').value,
+                slack_webhook_url: readSecretValue('slack_webhook_url'),
+                discord_webhook_url: readSecretValue('discord_webhook_url'),
+                webhook_url: readSecretValue('webhook_url'),
                 alert_threshold: document.getElementById('alert_threshold').value,
                 alert_rate_limit: parseInt(document.getElementById('alert_rate_limit').value) || 60,
                 smtp_enabled: document.getElementById('smtp_enabled').checked,
                 smtp_host: document.getElementById('smtp_host').value,
                 smtp_port: parseInt(document.getElementById('smtp_port').value) || 587,
                 smtp_username: document.getElementById('smtp_username').value,
-                smtp_password: document.getElementById('smtp_password').value,
+                smtp_password: readSecretValue('smtp_password'),
                 smtp_from: document.getElementById('smtp_from').value,
                 smtp_to: document.getElementById('smtp_to').value,
-                maxmind_license_key: document.getElementById('maxmind_license_key').value,
+                maxmind_license_key: readSecretValue('maxmind_license_key'),
                 geoip_enabled: document.getElementById('geoip_enabled').checked,
                 additional_ports: additionalPorts,
                 canary_tokens: canaryTokens,
@@ -706,8 +756,14 @@
                 retention_days: parseInt(document.getElementById('retention_days').value) || 90,
                 max_db_size_mb: parseInt(document.getElementById('max_db_size_mb').value) || 0,
                 fake_org_name: document.getElementById('fake_org_name').value,
+                fake_company_name: document.getElementById('fake_company_name').value,
+                fake_company_domain: document.getElementById('fake_company_domain').value,
                 response_delay_min_ms: parseInt(document.getElementById('response_delay_min_ms').value) || 80,
                 response_delay_max_ms: parseInt(document.getElementById('response_delay_max_ms').value) || 300,
+                ssh_honeypot_enabled: document.getElementById('ssh_honeypot_enabled').checked,
+                ssh_listen_host: document.getElementById('ssh_listen_host').value,
+                ssh_listen_port: parseInt(document.getElementById('ssh_listen_port').value) || 2222,
+                ssh_host_key_path: document.getElementById('ssh_host_key_path').value,
             };
 
             try {

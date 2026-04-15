@@ -26,6 +26,7 @@ ADMIN_PATH = os.getenv("ADMIN_PATH", "/admin")
 
 router = APIRouter(prefix=ADMIN_PATH)
 templates = Jinja2Templates(directory="templates")
+ACCESS_COOKIE_NAME = "access_token"
 
 
 def _country_flag(country_code: str) -> str:
@@ -84,10 +85,30 @@ def verify_token(token: str) -> Optional[str]:
 
 async def get_current_user(request: Request) -> Optional[str]:
     """Get current authenticated user from cookie."""
-    token = request.cookies.get("access_token")
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
     if not token:
         return None
     return verify_token(token)
+
+
+def _request_uses_https(request: Request) -> bool:
+    """Honor reverse-proxy TLS headers when deciding cookie security."""
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
+
+
+def _set_auth_cookie(response: Response, request: Request, username: str) -> None:
+    """Set the admin auth cookie consistently across login and secret rotation."""
+    access_token = create_access_token(data={"sub": username})
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
+        path=ADMIN_PATH,
+        secure=_request_uses_https(request),
+        samesite="lax",
+    )
 
 
 def require_auth(request: Request):
@@ -129,10 +150,16 @@ def _check_credentials(username: str, password: str) -> bool:
         stored_user = config.get("admin_username", "")
         stored_hash = config.get("admin_password", "")
         if username != stored_user:
-            return False
+            return username == _ENV_ADMIN_USERNAME and password == _ENV_ADMIN_PASSWORD
         if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
-            return pwd_context.verify(password, stored_hash)
-        return password == stored_hash  # plaintext fallback
+            if pwd_context.verify(password, stored_hash):
+                return True
+        elif stored_hash.startswith("$pbkdf2-sha256$"):
+            if pwd_context.verify(password, stored_hash):
+                return True
+        elif password == stored_hash:  # plaintext fallback
+            return True
+        return username == _ENV_ADMIN_USERNAME and password == _ENV_ADMIN_PASSWORD
     else:
         return username == _ENV_ADMIN_USERNAME and password == _ENV_ADMIN_PASSWORD
 
@@ -207,17 +234,8 @@ async def login_page(request: Request):
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Handle login form submission."""
     if _check_credentials(username, password):
-        access_token = create_access_token(data={"sub": username})
         response = RedirectResponse(url=ADMIN_PATH, status_code=303)
-        response.set_cookie(
-            key="access_token",
-            value=access_token,
-            httponly=True,
-            max_age=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
-            path=ADMIN_PATH,
-            secure=request.url.scheme == "https",
-            samesite="lax",
-        )
+        _set_auth_cookie(response, request, username)
         return response
 
     return templates.TemplateResponse(
@@ -231,7 +249,11 @@ async def login(request: Request, username: str = Form(...), password: str = For
 async def logout(request: Request):
     """Handle logout."""
     response = RedirectResponse(url=f"{ADMIN_PATH}/login", status_code=303)
-    response.delete_cookie(key="access_token", path=ADMIN_PATH, secure=request.url.scheme == "https")
+    response.delete_cookie(
+        key=ACCESS_COOKIE_NAME,
+        path=ADMIN_PATH,
+        secure=_request_uses_https(request),
+    )
     return response
 
 
@@ -377,6 +399,33 @@ async def api_requests(request: Request, limit: int = 100, offset: int = 0):
     return [r.to_dict() for r in requests]
 
 
+@router.delete("/api/requests/{request_id}")
+async def delete_request_endpoint(request: Request, request_id: int):
+    """Delete a logged request by ID."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    db = get_database()
+    ok = await db.delete_request(request_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return {"status": "deleted", "id": request_id}
+
+
+@router.patch("/api/requests/{request_id}")
+async def update_request_endpoint(request: Request, request_id: int):
+    """Update is_flagged and/or notes on a request."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+    data = await request.json()
+    db = get_database()
+    ok = await db.update_request_meta(request_id, data)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return {"status": "updated", "id": request_id}
+
+
 @router.get("/api/map")
 async def api_map_data(request: Request):
     """API endpoint for map data."""
@@ -386,6 +435,23 @@ async def api_map_data(request: Request):
 
     db = get_database()
     return await db.get_map_data()
+
+
+@router.get("/api/timeline")
+async def api_timeline(request: Request):
+    """24-hour request timeline — used by the dashboard activity chart."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    db = get_database()
+    stats = await db.get_stats()
+    # Fill in all 24 hours so the chart has no gaps
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    hours = [(now - timedelta(hours=i)).strftime("%Y-%m-%d %H:00") for i in range(23, -1, -1)]
+    hourly_map = {r["hour"]: r["count"] for r in stats.get("requests_per_hour", [])}
+    return [{"hour": h, "count": hourly_map.get(h, 0)} for h in hours]
 
 
 @router.get("/export/json")
@@ -407,6 +473,143 @@ async def export_json(
 
     return Response(
         content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/export/stix")
+async def export_stix(
+    request: Request,
+    limit: Optional[int] = 500,
+):
+    """
+    Export recent threat intel as a STIX 2.1 Bundle (JSON).
+
+    Each honeypot request becomes an Observed-Data SDO.  High-confidence
+    classifications also generate Threat-Actor and Indicator SDOs.
+    Compatible with MISP, Elastic SIEM, Splunk ES, and any other STIX 2.1
+    consumer.
+    """
+    import uuid as _uuid
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    db = get_database()
+    rows = await db.export_requests(format="json", limit=limit)
+
+    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    objects = []
+
+    # Identity SDO (the honeypot itself as the data source)
+    identity_id = "identity--" + str(_uuid.uuid5(_uuid.NAMESPACE_DNS, "honeypot.local"))
+    objects.append({
+        "type": "identity",
+        "spec_version": "2.1",
+        "id": identity_id,
+        "name": "AI Honeypot",
+        "identity_class": "system",
+        "created": now_iso,
+        "modified": now_iso,
+    })
+
+    seen_ips: dict[str, str] = {}  # ip → threat-actor id
+
+    for row in (rows or []):
+        ts = str(row.get("timestamp", now_iso)).replace(" ", "T")
+        if not ts.endswith("Z"):
+            ts += "Z"
+        ip = row.get("source_ip") or "0.0.0.0"
+        classification = row.get("classification") or "unknown"
+        threat_level = row.get("threat_level") or "unknown"
+        row_id = row.get("id", 0)
+
+        # Observed-Data SDO — one per request
+        obs_id = f"observed-data--{_uuid.uuid4()}"
+        objects.append({
+            "type": "observed-data",
+            "spec_version": "2.1",
+            "id": obs_id,
+            "created_by_ref": identity_id,
+            "created": ts,
+            "modified": ts,
+            "first_observed": ts,
+            "last_observed": ts,
+            "number_observed": 1,
+            "object_refs": [],
+            "x_honeypot": {
+                "request_id": row_id,
+                "source_ip": ip,
+                "country": row.get("country_name"),
+                "asn_org": row.get("asn_org"),
+                "method": row.get("method"),
+                "path": row.get("path"),
+                "api_key_prefix": (row.get("api_key") or "")[:12] or None,
+                "model_requested": row.get("model_requested"),
+                "classification": classification,
+                "classification_confidence": row.get("classification_confidence"),
+                "threat_level": threat_level,
+                "threat_type": row.get("threat_type"),
+                "ai_summary": row.get("ai_summary"),
+                "protocol": row.get("protocol"),
+                "agent_type": row.get("agent_type"),
+                "trap_hit": row.get("trap_hit"),
+                "is_flagged": row.get("is_flagged"),
+                "mitre_atlas_tags": row.get("mitre_atlas_tags"),
+            },
+        })
+
+        # Threat-Actor SDO — one per unique IP (deduped)
+        if ip not in seen_ips and classification not in ("human", "researcher", "unknown"):
+            ta_id = f"threat-actor--{_uuid.uuid5(_uuid.NAMESPACE_URL, f'honeypot-ip-{ip}')}"
+            seen_ips[ip] = ta_id
+            objects.append({
+                "type": "threat-actor",
+                "spec_version": "2.1",
+                "id": ta_id,
+                "created_by_ref": identity_id,
+                "created": ts,
+                "modified": ts,
+                "name": f"Honeypot Attacker {ip}",
+                "threat_actor_types": ["criminal" if classification == "credential_stuffer" else "hacker"],
+                "aliases": [ip],
+                "first_seen": ts,
+                "sophistication": "intermediate" if threat_level in ("high", "critical") else "minimal",
+                "resource_level": "individual",
+                "primary_motivation": (
+                    "financial-gain" if classification == "credential_stuffer"
+                    else "organizational-gain"
+                ),
+            })
+
+            # Indicator SDO for the IP
+            ind_id = f"indicator--{_uuid.uuid4()}"
+            objects.append({
+                "type": "indicator",
+                "spec_version": "2.1",
+                "id": ind_id,
+                "created_by_ref": identity_id,
+                "created": ts,
+                "modified": ts,
+                "name": f"Malicious IP: {ip}",
+                "indicator_types": ["malicious-activity"],
+                "pattern": f"[ipv4-addr:value = '{ip}']",
+                "pattern_type": "stix",
+                "valid_from": ts,
+                "confidence": int((row.get("classification_confidence") or 0.5) * 100),
+            })
+
+    bundle = {
+        "type": "bundle",
+        "id": f"bundle--{_uuid.uuid4()}",
+        "spec_version": "2.1",
+        "objects": objects,
+    }
+
+    filename = f"honeypot_stix_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    return Response(
+        content=json.dumps(bundle, indent=2, default=str),
         media_type="application/json",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
@@ -486,7 +689,7 @@ async def settings_page(request: Request):
         "admin/settings.html",
         {
             "request": request,
-            "config": config.get_all(),
+            "config": config.get_safe(),
             "geoip_loaded": geoip_loaded,
             "admin_path": ADMIN_PATH,
         },
@@ -514,6 +717,7 @@ async def save_settings(request: Request):
     try:
         data = await request.json()
         config = get_config()
+        current_jwt_secret = config.get("jwt_secret")
 
         # Update configuration
         config.update(**data)
@@ -528,7 +732,13 @@ async def save_settings(request: Request):
         from services.alerts import get_alert_service
         get_alert_service().reload_from_config()
 
-        return {"status": "ok", "message": "Settings saved"}
+        response = Response(
+            content=json.dumps({"status": "ok", "message": "Settings saved"}),
+            media_type="application/json",
+        )
+        if config.get("jwt_secret") != current_jwt_secret:
+            _set_auth_cookie(response, request, user)
+        return response
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
