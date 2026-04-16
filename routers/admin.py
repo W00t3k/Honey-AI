@@ -37,6 +37,30 @@ def _country_flag(country_code: str) -> str:
 
 templates.env.filters["country_flag"] = _country_flag
 
+
+import re as _re
+
+
+def _tax_short(tag: str) -> str:
+    if not tag:
+        return tag
+    m = _re.match(r"^(CWE-\d+)", tag)
+    if m:
+        return m.group(1)
+    m = _re.search(r":(AML\.[A-Z]\d+)", tag)
+    if m:
+        return m.group(1)
+    m = _re.search(r":(LLM\d+)", tag)
+    if m:
+        return m.group(1)
+    m = _re.search(r":(.+)", tag)
+    if m:
+        return m.group(1).split("/")[0].strip()[:22]
+    return tag[:22]
+
+
+templates.env.filters["tax_short"] = _tax_short
+
 # Password hashing
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
@@ -876,3 +900,131 @@ async def download_geoip(request: Request):
 
     except Exception as e:
         return {"success": False, "message": f"❌ Error: {str(e)}"}
+
+
+# ── Lure intelligence ─────────────────────────────────────────────────────────
+
+_LURE_PATH_PREFIXES = [
+    "/.env", "/.git/", "/config.json", "/settings.json", "/appsettings.json",
+    "/application.properties", "/backup.sql", "/dump.sql", "/database.sql",
+    "/api/keys", "/debug", "/_debug", "/actuator",
+    "/.cursorrules", "/CLAUDE.md", "/.claude/", "/.windsurfrules",
+    "/.aider", "/.continue/", "/docker-compose", "/Makefile",
+    "/.github/workflows/", "/internal/", "/system-prompt.txt",
+    "/prompts/", "/slack-export", "/download/", "/openapi.json",
+    "/swagger.json", "/api-docs", "/llms.txt", "/llmstxt",
+    "/.well-known/ai-plugin.json", "/.well-known/jwks.json",
+    "/robots.txt", "/sitemap.xml",
+]
+
+
+@router.get("/api/lure-stats")
+async def api_lure_stats(request: Request):
+    """Lure hit statistics — which traps fired and how often."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from sqlalchemy import select, func, or_
+    from models.db import Request as Req
+    db = get_database()
+    since = datetime.utcnow() - timedelta(days=30)
+
+    filters = [Req.path.like(f"{prefix}%") for prefix in _LURE_PATH_PREFIXES]
+    lure_filter = or_(*filters)
+
+    async with db.async_session() as session:
+        top_paths_q = await session.execute(
+            select(Req.path, func.count(Req.id).label("hits"))
+            .where(Req.timestamp >= since)
+            .where(lure_filter)
+            .group_by(Req.path)
+            .order_by(func.count(Req.id).desc())
+            .limit(20)
+        )
+        top_lure_paths = [{"path": r[0], "hits": r[1]} for r in top_paths_q.all()]
+
+        recent_q = await session.execute(
+            select(Req.id, Req.timestamp, Req.source_ip, Req.country_code, Req.path, Req.classification)
+            .where(lure_filter)
+            .order_by(Req.timestamp.desc())
+            .limit(20)
+        )
+        recent_hits = [
+            {"id": r[0], "timestamp": r[1].isoformat() if r[1] else None,
+             "ip": r[2], "country": r[3], "path": r[4], "classification": r[5]}
+            for r in recent_q.all()
+        ]
+
+        total_q = await session.execute(
+            select(func.count(Req.id)).where(lure_filter).where(Req.timestamp >= since)
+        )
+        trap_q = await session.execute(select(func.count(Req.id)).where(Req.trap_hit == True))  # noqa: E712
+        ft_q = await session.execute(
+            select(func.count(Req.id)).where(Req.path.like("/v1/fine-tuning/jobs%")).where(Req.method == "POST")
+        )
+        fu_q = await session.execute(
+            select(func.count(Req.id)).where(Req.path == "/v1/files").where(Req.method == "POST")
+        )
+
+    return {
+        "total_lure_hits_30d": total_q.scalar() or 0,
+        "canary_reuse_hits": trap_q.scalar() or 0,
+        "finetune_job_captures": ft_q.scalar() or 0,
+        "file_upload_captures": fu_q.scalar() or 0,
+        "top_lure_paths": top_lure_paths,
+        "recent_hits": recent_hits,
+    }
+
+
+# ── On-demand analysis ────────────────────────────────────────────────────────
+
+@router.post("/api/analyze/{request_id}")
+async def analyze_request_now(request: Request, request_id: int):
+    """Trigger immediate Groq AI analysis for a single request."""
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from services import get_logger
+    from services.analyzer import get_analyzer
+
+    db = get_database()
+    req = await db.get_request(request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    analyzer = get_analyzer()
+    if not analyzer.enabled:
+        raise HTTPException(status_code=503, detail="Analyzer not configured — set GROQ_API_KEY in .env")
+
+    try:
+        req_dict = req.to_dict()
+        analysis = await analyzer.analyze(req_dict)
+        if not analysis:
+            raise HTTPException(status_code=500, detail="Analysis returned no result")
+
+        await db.update_analysis(
+            request_id=request_id,
+            threat_level=analysis.threat_level,
+            threat_type=analysis.threat_type,
+            ai_summary=analysis.summary,
+            ai_details=analysis.details,
+            ai_recommendations=analysis.recommendations,
+            ai_iocs=analysis.iocs,
+            ai_confidence=analysis.confidence,
+            ai_actor_type=getattr(analysis, "actor_type", "unknown"),
+        )
+        updated = await db.get_request(request_id)
+        return {
+            "status": "analyzed",
+            "request_id": request_id,
+            "threat_level": updated.threat_level if updated else None,
+            "threat_type": updated.threat_type if updated else None,
+            "ai_summary": updated.ai_summary if updated else None,
+            "ai_actor_type": updated.ai_actor_type if updated else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,1941 +1,1739 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="soc">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Console</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <title>Honeypot Console</title>
+    <!-- Apply saved theme before first paint — no flash -->
+    <script>(function(){var t=localStorage.getItem('hp-theme')||'soc';document.documentElement.setAttribute('data-theme',t);})();</script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        :root {
-            --bg-primary: #0f0f1a;
-            --bg-secondary: #1a1a2e;
-            --bg-tertiary: #252542;
-            --accent: #e94560;
-            --accent-hover: #ff6b8a;
-            --text-primary: #e4e4e4;
-            --text-secondary: #888;
-            --border: rgba(100, 100, 150, 0.2);
-            --success: #4ade80;
-            --warning: #fbbf24;
-            --danger: #f87171;
-            --critical: #dc2626;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            min-height: 100vh;
-        }
-
-        .header {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border);
-            padding: 15px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .logo h1 {
-            font-size: 20px;
-            color: var(--accent);
-        }
-
-        .logo span {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .btn {
-            padding: 8px 16px;
-            border-radius: 6px;
-            border: none;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-primary {
-            background: var(--accent);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--accent-hover);
-        }
-
-        .btn-secondary {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-
-        .btn-secondary:hover {
-            background: rgba(100, 100, 150, 0.2);
-        }
-
-        .container {
-            max-width: 1800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-
-        .stat-card {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 18px;
-        }
-
-        .stat-card.critical {
-            border-color: var(--critical);
-            background: rgba(220, 38, 38, 0.1);
-        }
-
-        .stat-card h3 {
-            color: var(--text-secondary);
-            font-size: 12px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-
-        .stat-value {
-            font-size: 28px;
-            font-weight: 700;
-            color: var(--text-primary);
-        }
-
-        .stat-card.critical .stat-value {
-            color: var(--critical);
-        }
-
-        .content-grid {
-            display: grid;
-            grid-template-columns: 1fr 420px;
-            gap: 20px;
-        }
-
-        @media (max-width: 1200px) {
-            .content-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .panel {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .panel-header h2 {
-            font-size: 16px;
-            font-weight: 600;
-        }
-
-        .panel-body {
-            padding: 20px;
-        }
-
-        #map {
-            height: 350px;
-            border-radius: 8px;
-            background: var(--bg-tertiary);
-        }
-
-        .request-feed {
-            max-height: 700px;
-            overflow-y: auto;
-        }
-
-        .request-item {
-            padding: 15px;
-            border-bottom: 1px solid var(--border);
-            transition: background 0.2s;
-            cursor: pointer;
-        }
-
-        .request-item:hover {
-            background: rgba(100, 100, 150, 0.1);
-        }
-
-        .request-item:last-child {
-            border-bottom: none;
-        }
-
-        .request-item.expanded {
-            background: rgba(100, 100, 150, 0.15);
-        }
-
-        .request-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 8px;
-        }
-
-        .request-id {
-            font-size: 11px;
-            color: var(--text-secondary);
-            font-family: monospace;
-        }
-
-        .request-method {
-            font-weight: 600;
-            font-size: 12px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            background: rgba(100, 100, 150, 0.2);
-        }
-
-        .request-method.POST {
-            background: rgba(233, 69, 96, 0.2);
-            color: var(--accent);
-        }
-
-        .request-method.GET {
-            background: rgba(74, 222, 128, 0.2);
-            color: var(--success);
-        }
-
-        .request-time {
-            color: var(--text-secondary);
-            font-size: 12px;
-        }
-
-        .request-path {
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-            color: var(--text-primary);
-            word-break: break-all;
-        }
-
-        .request-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 8px;
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-
-        .request-ip {
-            font-family: monospace;
-        }
-
-        .badge {
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge.scanner { background: rgba(251, 191, 36, 0.2); color: var(--warning); }
-        .badge.credential_stuffer { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
-        .badge.prompt_harvester { background: rgba(192, 132, 252, 0.2); color: #c084fc; }
-        .badge.data_exfil { background: rgba(220, 38, 38, 0.25); color: #f87171; border: 1px solid rgba(220,38,38,0.4); }
-        .badge.recon { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
-        .badge.researcher { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
-        .badge.human { background: rgba(74, 222, 128, 0.2); color: var(--success); }
-        .badge.unknown { background: rgba(100, 100, 150, 0.2); color: var(--text-secondary); }
-        /* Actor type badges */
-        .badge.actor-human { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.4); }
-        .badge.actor-bot { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.4); }
-        .badge.actor-llm_agent { background: rgba(233, 69, 96, 0.2); color: #e94560; border: 1px solid rgba(233,69,96,0.5); }
-        .badge.actor-researcher { background: rgba(96, 165, 250, 0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.4); }
-        .badge.actor-unknown { background: rgba(100, 100, 150, 0.15); color: #888; border: 1px solid rgba(100,100,150,0.3); }
-        /* Protocol source badges */
-        .badge.proto-openai_api { background: rgba(96,165,250,0.1); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); font-size: 10px; }
-        .badge.proto-anthropic_api { background: rgba(192,132,252,0.1); color: #c084fc; border: 1px solid rgba(192,132,252,0.3); font-size: 10px; }
-        .badge.proto-mcp { background: rgba(167,139,250,0.15); color: #a78bfa; border: 1px solid rgba(167,139,250,0.4); font-size: 10px; }
-        .badge.proto-web { background: rgba(148,163,184,0.1); color: #94a3b8; border: 1px solid rgba(148,163,184,0.2); font-size: 10px; }
-
-        .threat-badge {
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .threat-badge.low { background: rgba(74, 222, 128, 0.2); color: var(--success); }
-        .threat-badge.medium { background: rgba(251, 191, 36, 0.2); color: var(--warning); }
-        .threat-badge.high { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
-        .threat-badge.critical { background: rgba(220, 38, 38, 0.3); color: #ff4444; }
-
-        /* AI Analysis Panel */
-        .ai-analysis {
-            margin-top: 12px;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 8px;
-            border-left: 3px solid var(--accent);
-            display: none;
-        }
-
-        .ai-analysis.visible {
-            display: block;
-        }
-
-        .ai-analysis-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-            font-size: 12px;
-            color: var(--accent);
-            font-weight: 600;
-        }
-
-        .ai-analysis-header svg {
-            width: 14px;
-            height: 14px;
-        }
-
-        .ai-summary {
-            font-size: 13px;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-        }
-
-        .ai-details {
-            font-size: 12px;
-            color: var(--text-secondary);
-            line-height: 1.5;
-        }
-
-        .ai-recommendations {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border);
-        }
-
-        .ai-recommendations h4 {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            margin-bottom: 6px;
-        }
-
-        .ai-recommendations ul {
-            list-style: none;
-            font-size: 12px;
-        }
-
-        .ai-recommendations li {
-            padding: 3px 0;
-            color: var(--text-primary);
-        }
-
-        .ai-recommendations li::before {
-            content: "→ ";
-            color: var(--accent);
-        }
-
-        .refresh-indicator {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            color: var(--text-secondary);
-            font-size: 12px;
-        }
-
-        .refresh-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--success);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .sidebar-panels {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .country-list, .classification-list {
-            list-style: none;
-        }
-
-        .country-item, .classification-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .country-item:last-child, .classification-item:last-child {
-            border-bottom: none;
-        }
-
-        .country-name {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .country-flag {
-            font-size: 18px;
-        }
-
-        .country-count {
-            font-weight: 600;
-            color: var(--accent);
-        }
-
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-tertiary); }
-        ::-webkit-scrollbar-thumb { background: rgba(100, 100, 150, 0.5); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 150, 0.7); }
-
-        /* Activity chart */
-        .chart-container {
-            position: relative;
-            height: 160px;
-        }
-
-        /* Filter bar */
-        .filter-bar {
-            display: flex;
-            gap: 8px;
-            padding: 12px 20px;
-            border-bottom: 1px solid var(--border);
-            background: var(--bg-tertiary);
-            flex-wrap: wrap;
-        }
-
-        .filter-input {
-            flex: 1;
-            min-width: 180px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 7px 12px;
-            color: var(--text-primary);
-            font-size: 13px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        .filter-input:focus {
-            border-color: var(--accent);
-        }
-
-        .filter-input::placeholder {
-            color: var(--text-secondary);
-        }
-
-        .filter-select {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 7px 10px;
-            color: var(--text-primary);
-            font-size: 12px;
-            outline: none;
-            cursor: pointer;
-            transition: border-color 0.2s;
-        }
-
-        .filter-select:focus {
-            border-color: var(--accent);
-        }
-
-        .filter-clear {
-            padding: 7px 14px;
-            background: none;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--text-secondary);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .filter-clear:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .filter-count {
-            display: flex;
-            align-items: center;
-            font-size: 12px;
-            color: var(--text-secondary);
-            white-space: nowrap;
-        }
-
-        .stat-card .stat-delta {
-            font-size: 11px;
-            margin-top: 4px;
-            font-weight: 500;
-        }
-        .stat-delta.up { color: var(--success); }
-        .stat-delta.down { color: var(--danger); }
-        .stat-delta.neutral { color: var(--text-secondary); }
-
-        .groq-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 2px 6px;
-            background: linear-gradient(135deg, #f55036, #ff6b4a);
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 600;
-            color: white;
-        }
-
-        .ai-iocs {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border);
-        }
-
-        .ai-iocs h4 {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            margin-bottom: 6px;
-        }
-
-        .ioc-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-        }
-
-        .ioc-pill {
-            font-family: monospace;
-            font-size: 11px;
-            padding: 2px 8px;
-            background: rgba(233, 69, 96, 0.1);
-            border: 1px solid rgba(233, 69, 96, 0.3);
-            border-radius: 4px;
-            color: #f87171;
-        }
-
-        .observables-grid {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border);
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 6px;
-        }
-
-        .obs-item {
-            font-size: 11px;
-            font-family: monospace;
-            color: var(--text-secondary);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .obs-item span {
-            color: var(--text-primary);
-        }
-
-        .agent-signal-row {
-            margin-top: 8px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            align-items: center;
-        }
-
-        .agent-signal-label {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .trap-hit-banner {
-            margin-top: 8px;
-            padding: 6px 10px;
-            background: rgba(233, 69, 96, 0.15);
-            border: 1px solid rgba(233, 69, 96, 0.5);
-            border-radius: 6px;
-            font-size: 12px;
-            color: #e94560;
-            font-weight: 600;
-        }
-
-        /* Clickable stat cards */
-        .stat-card.clickable {
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .stat-card.clickable:hover {
-            border-color: var(--accent) !important;
-            background: rgba(233, 69, 96, 0.08) !important;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.2);
-        }
-        .stat-card.clickable::after {
-            content: " ↓";
-            font-size: 10px;
-            color: var(--text-secondary);
-            display: block;
-            margin-top: 4px;
-        }
-
-        /* Inline detail rows (port, location, session, etc.) */
-        .detail-rows {
-            display: grid;
-            grid-template-columns: 110px 1fr;
-            gap: 3px 10px;
-            font-size: 11px;
-            margin-bottom: 10px;
-            padding: 8px 0 10px;
-            border-bottom: 1px solid var(--border);
-        }
-        .detail-label {
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            font-size: 10px;
-            letter-spacing: 0.4px;
-            align-self: center;
-            white-space: nowrap;
-        }
-        .detail-value {
-            font-family: monospace;
-            color: var(--text-primary);
-            font-size: 11px;
-            word-break: break-all;
-        }
-
-        /* Always-visible taxonomy strip below the badge row */
-        .taxonomy-inline {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-            margin-top: 6px;
-        }
-
-        /* Taxonomy sections (OWASP / MITRE / CWE) */
-        .taxonomy-section {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--border);
-        }
-        .taxonomy-section h4 {
-            font-size: 10px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 5px;
-        }
-        .taxonomy-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-        }
-        .owasp-tag {
-            font-size: 10px;
-            padding: 2px 7px;
-            background: rgba(251, 146, 60, 0.1);
-            border: 1px solid rgba(251, 146, 60, 0.35);
-            border-radius: 4px;
-            color: #fb923c;
-        }
-        .mitre-tag {
-            font-size: 10px;
-            padding: 2px 7px;
-            background: rgba(248, 113, 113, 0.1);
-            border: 1px solid rgba(248, 113, 113, 0.35);
-            border-radius: 4px;
-            color: #f87171;
-        }
-        .cwe-tag {
-            font-size: 10px;
-            padding: 2px 7px;
-            background: rgba(167, 139, 250, 0.1);
-            border: 1px solid rgba(167, 139, 250, 0.35);
-            border-radius: 4px;
-            color: #a78bfa;
-        }
-
-        /* Action bar inside expanded request */
-        .action-bar {
-            display: flex;
-            gap: 6px;
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border);
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        .action-btn {
-            padding: 4px 10px;
-            border-radius: 5px;
-            border: 1px solid var(--border);
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: transparent;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.4px;
-            white-space: nowrap;
-        }
-        .action-btn:hover { border-color: var(--accent); color: var(--accent); }
-        .action-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-        .action-btn.flagged {
-            background: rgba(251, 191, 36, 0.15);
-            border-color: #fbbf24;
-            color: #fbbf24;
-        }
-        .note-input {
-            flex: 1;
-            min-width: 130px;
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-radius: 5px;
-            padding: 4px 8px;
-            color: var(--text-primary);
-            font-size: 11px;
-            outline: none;
-        }
-        .note-input:focus { border-color: var(--accent); }
-
-        /* Delete confirmation modal */
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.75);
-            z-index: 10000;
-            display: none;
-            align-items: center;
-            justify-content: center;
-        }
-        .modal-overlay.open { display: flex; }
-        .modal-box {
-            background: var(--bg-secondary);
-            border: 1px solid rgba(248, 113, 113, 0.4);
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 380px;
-            width: 90%;
-        }
-        .modal-box h3 { font-size: 15px; color: var(--danger); margin-bottom: 10px; }
-        .modal-box p { font-size: 13px; color: var(--text-secondary); margin-bottom: 18px; line-height: 1.5; }
-        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-
-        @keyframes fadeOutRow {
-            from { opacity: 1; transform: scaleY(1); max-height: 200px; }
-            to   { opacity: 0; transform: scaleY(0); max-height: 0; padding: 0; }
-        }
-        .deleting { animation: fadeOutRow 0.3s forwards; overflow: hidden; }
+    /* ── Theme variables ──────────────────────────────────────────── */
+    :root {
+        /* SOC Terminal — default */
+        --bg:     #0d0d0d;
+        --surf:   #141414;
+        --surf2:  #1a1a1a;
+        --line:   #1c1c1c;
+        --border: #262626;
+        --text:   #d4d4d4;
+        --dim:    #4a4a4a;
+        --accent: #d97706;
+        --red:    #dc2626;
+        --green:  #16a34a;
+        --blue:   #3b82f6;
+        --purple: #8b5cf6;
+        --orange: #ea580c;
+        --yellow: #ca8a04;
+        --mono: 'Fira Code','JetBrains Mono','Cascadia Code','Consolas',monospace;
+        --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    }
+
+    [data-theme="swiss"] {
+        --bg:     #070707;
+        --surf:   #0e0e0e;
+        --surf2:  #131313;
+        --line:   #161616;
+        --border: #202020;
+        --text:   #f0f0f0;
+        --dim:    #3a3a3a;
+        --accent: #e63c2f;
+        --red:    #e63c2f;
+        --green:  #22c55e;
+        --blue:   #60a5fa;
+        --purple: #a78bfa;
+        --orange: #f97316;
+        --yellow: #facc15;
+    }
+
+    [data-theme="paper"] {
+        --bg:     #f0ede6;
+        --surf:   #f7f5f0;
+        --surf2:  #ffffff;
+        --line:   #e8e2d8;
+        --border: #d5cec4;
+        --text:   #1a1916;
+        --dim:    #8a8278;
+        --accent: #b91c1c;
+        --red:    #b91c1c;
+        --green:  #166534;
+        --blue:   #1d4ed8;
+        --purple: #6d28d9;
+        --orange: #c2410c;
+        --yellow: #92400e;
+    }
+
+    /* ── Reset ────────────────────────────────────────────────────── */
+    *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5; min-height: 100vh; }
+    a { color: var(--text); text-decoration: none; }
+    a:hover { color: var(--accent); }
+    button { font-family: inherit; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .hdr {
+        display: flex; align-items: center; gap: 16px;
+        padding: 0 16px; height: 40px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surf);
+        position: sticky; top: 0; z-index: 200;
+    }
+    .brand { font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+    .hdr-sep { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
+    .hdr-nav { display: flex; gap: 1px; }
+    .hdr-nav a { padding: 3px 9px; font-size: 12px; color: var(--dim); border-radius: 2px; transition: color .15s; }
+    .hdr-nav a:hover { color: var(--text); }
+    .hdr-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+    /* Live indicator */
+    .live { display: flex; align-items: center; gap: 5px; }
+    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: blink 2s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    #feed-status { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+
+    /* Theme switcher */
+    .theme-sw { display: flex; }
+    .theme-sw button {
+        padding: 3px 8px; font-size: 10px; font-family: var(--mono); font-weight: 700;
+        letter-spacing: .08em; text-transform: uppercase; background: transparent;
+        border: 1px solid var(--border); color: var(--dim); cursor: pointer;
+        transition: all .15s; margin-left: -1px;
+    }
+    .theme-sw button:first-child { border-radius: 2px 0 0 2px; }
+    .theme-sw button:last-child  { border-radius: 0 2px 2px 0; }
+    .theme-sw button:hover { border-color: var(--dim); color: var(--text); z-index: 1; }
+    .theme-sw button.on { border-color: var(--accent); color: var(--accent); z-index: 2; }
+
+    /* Small header buttons */
+    .hdr-btn {
+        padding: 3px 10px; font-size: 11px; background: transparent;
+        border: 1px solid var(--border); border-radius: 2px; color: var(--dim);
+        cursor: pointer; transition: all .15s; white-space: nowrap;
+    }
+    .hdr-btn:hover { border-color: var(--text); color: var(--text); }
+    .hdr-btn.primary { border-color: var(--accent); color: var(--accent); }
+    .hdr-btn.primary:hover { background: var(--accent); color: var(--bg); }
+
+    /* ── Stat bar ─────────────────────────────────────────────────── */
+    .stat-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--surf); overflow-x: auto; }
+    .stat-cell {
+        flex: 1; min-width: 90px; padding: 8px 14px;
+        border-right: 1px solid var(--border);
+        cursor: pointer; transition: background .15s; user-select: none;
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-cell:hover { background: var(--surf2); }
+    .stat-cell:hover .s-val { color: var(--accent); }
+    .s-lbl { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; white-space: nowrap; }
+    .s-val { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; transition: color .15s; }
+    .s-val.red { color: var(--red); }
+    .s-val.amber { color: var(--accent); }
+    .s-val.green { color: var(--green); }
+    .s-val.purple { color: var(--purple); }
+
+    /* ── Page layout ──────────────────────────────────────────────── */
+    .layout {
+        display: grid;
+        grid-template-columns: 1fr 230px;
+        height: calc(100vh - 82px); /* fixed — enables independent column scroll */
+        overflow: hidden;
+    }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; height: auto; } }
+    .main-col { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    .sidebar  { overflow-y: auto; height: 100%; }
+
+    /* ── Tactical Map ─────────────────────────────────────────────── */
+    .sec-title { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); font-family: var(--mono); }
+
+    .map-container {
+        position: relative;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+    }
+    #map { height: 300px; background: #060608; }
+    [data-theme="paper"] #map { background: #d4d0c8; }
+
+    /* CRT scan-line overlay — hidden on paper (light) theme */
+    .map-scanlines {
+        position: absolute; inset: 0; pointer-events: none; z-index: 450;
+        background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.07) 2px,
+            rgba(0,0,0,0.07) 4px
+        );
+    }
+    [data-theme="paper"] .map-scanlines { display: none; }
+
+    /* Vignette edge — softer on paper theme */
+    .map-vignette {
+        position: absolute; inset: 0; pointer-events: none; z-index: 449;
+        background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+    }
+    [data-theme="paper"] .map-vignette {
+        background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.18) 100%);
+    }
+
+    /* Corner overlay chrome */
+    .map-chrome {
+        position: absolute; inset: 0; z-index: 460;
+        pointer-events: none;
+        padding: 10px 12px;
+        display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .mc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .mc-bot { display: flex; justify-content: space-between; align-items: flex-end; }
+
+    .mc-badge {
+        background: rgba(0,0,0,0.82);
+        border: 1px solid var(--accent);
+        padding: 4px 10px;
+        font-family: var(--mono); font-size: 9px; font-weight: 700;
+        color: var(--accent); letter-spacing: .1em; text-transform: uppercase;
+        display: flex; align-items: center; gap: 6px;
+    }
+    .mc-badge .liveDot {
+        width: 6px; height: 6px; border-radius: 50%; background: var(--red);
+        animation: blink 1s step-end infinite; flex-shrink: 0;
+    }
+
+    .mc-chips { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+    .mc-chip {
+        background: rgba(0,0,0,0.80); border: 1px solid rgba(255,255,255,0.10);
+        padding: 3px 9px; font-family: var(--mono); font-size: 9px; color: var(--dim);
+        text-transform: uppercase; letter-spacing: .07em; white-space: nowrap;
+    }
+    .mc-chip .cv { color: var(--accent); font-weight: 700; margin-left: 5px; }
+    .mc-chip .cv.red { color: var(--red); }
+    .mc-chip .cv.grn { color: var(--green); }
+
+    .mc-coords {
+        background: rgba(0,0,0,0.80); border: 1px solid rgba(255,255,255,0.08);
+        padding: 3px 9px; font-family: var(--mono); font-size: 9px; color: var(--dim);
+        letter-spacing: .05em; min-width: 180px;
+    }
+    .mc-class {
+        background: rgba(0,0,0,0.80); border: 1px solid rgba(255,255,255,0.08);
+        padding: 3px 9px; font-family: var(--mono); font-size: 8px; color: var(--dim);
+        letter-spacing: .14em; text-transform: uppercase;
+    }
+
+    /* Animated arcs */
+    @keyframes arc-march { to { stroke-dashoffset: -60; } }
+
+    /* Pulsing rings around attack nodes */
+    @keyframes ring-out {
+        0%   { transform: scale(0.3); opacity: 0.9; }
+        100% { transform: scale(2.6); opacity: 0; }
+    }
+
+    /* Custom Leaflet popup */
+    .leaflet-popup-content-wrapper {
+        background: var(--surf) !important; border: 1px solid var(--accent) !important;
+        border-radius: 2px !important; box-shadow: 0 0 24px rgba(0,0,0,0.9) !important;
+        color: var(--text) !important; padding: 0 !important;
+    }
+    .leaflet-popup-tip-container { display: none !important; }
+    .leaflet-popup-content { margin: 0 !important; }
+    .leaflet-popup-close-button { color: var(--dim) !important; top: 7px !important; right: 8px !important; font-size: 14px !important; }
+
+    /* Leaflet zoom control */
+    .leaflet-control-zoom { border: 1px solid var(--border) !important; border-radius: 2px !important; overflow: hidden; }
+    .leaflet-control-zoom a { background: var(--surf) !important; color: var(--dim) !important; border: none !important; border-bottom: 1px solid var(--border) !important; transition: color .15s !important; }
+    .leaflet-control-zoom a:hover { color: var(--accent) !important; background: var(--surf2) !important; }
+
+    /* ── Chart ────────────────────────────────────────────────────── */
+    .chart-wrap { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .sec-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .sec-sub { font-size: 10px; color: var(--dim); font-family: var(--mono); }
+    .chart-box { height: 96px; position: relative; }
+    .chart-box-sm { height: 68px; position: relative; }
+
+    /* ── Filter bar ───────────────────────────────────────────────── */
+    .filter-bar {
+        display: flex; gap: 5px; padding: 7px 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surf); flex-wrap: wrap; align-items: center;
+    }
+    .f-in {
+        flex: 1; min-width: 150px; background: var(--bg);
+        border: 1px solid var(--border); border-radius: 2px;
+        padding: 4px 8px; color: var(--text);
+        font-size: 11px; font-family: var(--mono); outline: none;
+    }
+    .f-in:focus { border-color: var(--accent); }
+    .f-in::placeholder { color: var(--dim); }
+    .f-sel {
+        background: var(--bg); border: 1px solid var(--border); border-radius: 2px;
+        padding: 4px 6px; color: var(--text); font-size: 11px;
+        font-family: var(--mono); outline: none; cursor: pointer;
+    }
+    .f-sel:focus { border-color: var(--accent); }
+    .f-clr {
+        padding: 4px 10px; background: transparent; border: 1px solid var(--border);
+        border-radius: 2px; color: var(--dim); font-size: 11px;
+        font-family: var(--mono); cursor: pointer; transition: all .15s;
+    }
+    .f-clr:hover { border-color: var(--text); color: var(--text); }
+    .f-count { font-size: 11px; color: var(--dim); font-family: var(--mono); white-space: nowrap; }
+
+    /* ── Request table ────────────────────────────────────────────── */
+    .tbl-wrap { overflow: auto; flex: 1; }
+    .req-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
+
+    .req-tbl thead th {
+        padding: 5px 10px; text-align: left; font-size: 10px;
+        text-transform: uppercase; letter-spacing: .07em;
+        color: var(--dim); border-bottom: 1px solid var(--border);
+        background: var(--surf); font-weight: 600; font-family: var(--mono);
+        position: sticky; top: 0; white-space: nowrap; user-select: none;
+    }
+
+    .req-tbl tbody tr.rr {
+        border-bottom: 1px solid var(--line);
+        cursor: pointer; transition: background .1s;
+    }
+    .req-tbl tbody tr.rr:hover { background: var(--surf); }
+    .req-tbl tbody tr.rr.expanded { background: var(--surf2); }
+    @keyframes rowIn { from { background: rgba(217,119,6,.14); } to {} }
+    .rr.new { animation: rowIn 2.5s ease forwards; }
+
+    .req-tbl td {
+        padding: 5px 10px; font-size: 11px; vertical-align: middle;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .req-tbl td.mono { font-family: var(--mono); }
+
+    /* Column widths */
+    .c-time   { width: 66px; }
+    .c-method { width: 50px; }
+    .c-path   { }
+    .c-ip     { width: 136px; }
+    .c-class  { width: 148px; }
+    .c-threat { width: 62px; }
+    .c-proto  { width: 80px; }
+    .c-sig    { width: 70px; }
+
+    /* Taxonomy inline strip (always visible, below request row) */
+    .tax-row td { padding: 2px 10px 4px; border-bottom: 1px solid var(--line); }
+    .tax-strip { display: flex; flex-wrap: wrap; gap: 3px; }
+
+    /* Detail sub-row */
+    .dr { display: none; }
+    .dr.open { display: table-row; }
+    .dr-cell {
+        padding: 12px 16px 14px;
+        background: var(--surf);
+        border-bottom: 2px solid var(--border);
+    }
+
+    /* ── Method colors ────────────────────────────────────────────── */
+    .m-get  { color: var(--green);  font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .m-post { color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .m-del  { color: var(--red);    font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .m-put  { color: var(--blue);   font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .m-other{ color: var(--dim);    font-family: var(--mono); font-size: 11px; font-weight: 700; }
+
+    /* ── Classification ───────────────────────────────────────────── */
+    .cls-scanner           { color: var(--yellow); font-family: var(--mono); font-size: 11px; }
+    .cls-credential_stuffer{ color: var(--red);    font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .cls-prompt_harvester  { color: var(--purple); font-family: var(--mono); font-size: 11px; }
+    .cls-data_exfil        { color: var(--red);    font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .cls-recon             { color: var(--orange); font-family: var(--mono); font-size: 11px; }
+    .cls-researcher        { color: var(--blue);   font-family: var(--mono); font-size: 11px; }
+    .cls-human             { color: var(--green);  font-family: var(--mono); font-size: 11px; }
+    .cls-unknown           { color: var(--dim);    font-family: var(--mono); font-size: 11px; }
+
+    /* ── Threat level ─────────────────────────────────────────────── */
+    .thr-critical { color: var(--red);    font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .thr-high     { color: var(--red);    font-family: var(--mono); font-size: 11px; }
+    .thr-medium   { color: var(--accent); font-family: var(--mono); font-size: 11px; }
+    .thr-low      { color: var(--green);  font-family: var(--mono); font-size: 11px; }
+    .thr-none     { color: var(--dim);    font-family: var(--mono); font-size: 11px; }
+
+    /* Protocol */
+    .proto-tag { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+    .proto-mcp { color: var(--purple); }
+    .proto-openai_api { color: var(--blue); }
+    .proto-anthropic_api { color: var(--purple); }
+    .proto-gemini_api { color: var(--green); }
+
+    /* Inline signal pills */
+    .sig-pill {
+        display: inline-block; font-family: var(--mono); font-size: 10px;
+        padding: 1px 4px; border: 1px solid; border-radius: 2px; line-height: 1.4;
+        white-space: nowrap;
+    }
+    .sig-trap   { color: var(--red);    border-color: rgba(220,38,38,.5); }
+    .sig-canary { color: var(--accent); border-color: rgba(217,119,6,.5); }
+    .sig-agent  { color: var(--purple); border-color: rgba(139,92,246,.5); }
+    .sig-tools  { color: var(--green);  border-color: rgba(22,163,74,.5); }
+
+    /* ── Detail panel ─────────────────────────────────────────────── */
+    .detail-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+    }
+    @media (max-width: 800px) { .detail-grid { grid-template-columns: 1fr; } }
+    .detail-block { }
+    .db-title {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+        color: var(--dim); font-family: var(--mono); font-weight: 700;
+        margin-bottom: 7px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+    }
+    .kv { display: grid; grid-template-columns: 96px 1fr; gap: 2px 8px; }
+    .kv-k { color: var(--dim); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; align-self: start; padding-top: 1px; white-space: nowrap; }
+    .kv-v { font-family: var(--mono); color: var(--text); font-size: 11px; word-break: break-all; }
+    .kv-v.hi { color: var(--accent); }
+    .kv-v.red { color: var(--red); }
+
+    /* ── Taxonomy pills ───────────────────────────────────────────── */
+    .pill-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pill {
+        font-family: var(--mono); font-size: 10px; padding: 2px 6px;
+        border: 1px solid; border-radius: 2px; line-height: 1.4;
+    }
+    .pill-owasp { color: var(--orange); border-color: rgba(234,88,12,.3); background: rgba(234,88,12,.05); }
+    .pill-mitre { color: var(--red);    border-color: rgba(220,38,38,.3); background: rgba(220,38,38,.05); }
+    .pill-cwe   { color: var(--purple); border-color: rgba(139,92,246,.3); background: rgba(139,92,246,.05); }
+
+    /* Also used in the always-visible strip */
+    .pill-sm { font-size: 9px; padding: 1px 5px; }
+    /* Compact chip — short code displayed, full text on hover tooltip */
+    .pill-compact { cursor: default; white-space: nowrap; }
+
+    /* ── AI analysis block ────────────────────────────────────────── */
+    .ai-block { border-left: 2px solid var(--accent); padding-left: 10px; }
+    .ai-lbl { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; font-family: var(--mono); margin-bottom: 4px; }
+    .ai-sum { font-size: 12px; color: var(--text); margin-bottom: 4px; }
+    .ai-det { font-size: 11px; color: var(--dim); line-height: 1.6; }
+    .ai-pend { font-size: 11px; color: var(--dim); font-style: italic; }
+    .ioc-list { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; }
+    .ioc { font-family: var(--mono); font-size: 10px; padding: 1px 6px; background: rgba(220,38,38,.07); border: 1px solid rgba(220,38,38,.25); border-radius: 2px; color: var(--red); }
+    .rec-list { list-style: none; margin-top: 6px; }
+    .rec-list li { font-size: 11px; color: var(--dim); padding: 1px 0; }
+    .rec-list li::before { content: "→ "; color: var(--accent); }
+
+    /* Trap banner */
+    .trap-banner { margin-bottom: 10px; padding: 5px 10px; border: 1px solid var(--red); background: rgba(220,38,38,.07); font-family: var(--mono); font-size: 11px; color: var(--red); font-weight: 700; }
+
+    /* ── Action bar ───────────────────────────────────────────────── */
+    .act-bar { display: flex; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+    .act-btn {
+        padding: 3px 10px; background: transparent; border: 1px solid var(--border);
+        border-radius: 2px; color: var(--dim); font-size: 10px; font-family: var(--mono);
+        font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+        cursor: pointer; transition: all .15s;
+    }
+    .act-btn:hover { border-color: var(--text); color: var(--text); }
+    .act-btn.danger:hover { border-color: var(--red); color: var(--red); }
+    .act-btn.flagged { border-color: var(--accent); color: var(--accent); }
+    .note-in { flex: 1; min-width: 120px; background: var(--bg); border: 1px solid var(--border); border-radius: 2px; padding: 3px 8px; color: var(--text); font-size: 11px; font-family: var(--mono); outline: none; }
+    .note-in:focus { border-color: var(--accent); }
+    .reclassify-sel { background: var(--bg); border: 1px solid var(--border); border-radius: 2px; padding: 2px 6px; color: var(--text); font-size: 10px; font-family: var(--mono); cursor: pointer; outline: none; transition: border-color .15s; }
+    .reclassify-sel:hover { border-color: var(--accent); }
+    .reason-list { margin-top: 4px; }
+    .reason-item { font-size: 10px; font-family: var(--mono); color: var(--dim); padding: 2px 0; border-bottom: 1px solid var(--line); }
+    .reason-item:last-child { border-bottom: none; }
+    .reason-item.dim { font-style: italic; }
+    .analyze-err { font-size: 10px; font-family: var(--mono); color: var(--red); margin-left: 6px; }
+
+    /* ── Sidebar ──────────────────────────────────────────────────── */
+    .sidebar { overflow-y: auto; }
+    .sb-sec { border-bottom: 1px solid var(--border); }
+    .sb-hdr { padding: 7px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); font-family: var(--mono); border-bottom: 1px solid var(--line); background: var(--surf); }
+    .sb-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 12px; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .sb-row:last-child { border-bottom: none; }
+
+    /* ── Lure Intel panel ────────────────────────────────────────── */
+    .lure-stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); margin-bottom: 1px; }
+    .lure-stat { background: var(--surf); padding: 7px 10px; text-align: center; }
+    .ls-val { font-family: var(--mono); font-size: 16px; font-weight: 700; color: var(--accent); }
+    .ls-val.red { color: var(--red); }
+    .ls-lbl { font-size: 9px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+    .lure-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 12px; border-bottom: 1px solid var(--line); gap: 6px; }
+    .lure-path { font-family: var(--mono); font-size: 10px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .lure-hits { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+    .sb-k { color: var(--text); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+    .sb-v { color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 700; flex-shrink: 0; margin-left: 8px; }
+    .sb-cls { font-family: var(--mono); font-size: 11px; }
+
+    /* ── Delete modal ─────────────────────────────────────────────── */
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 9999; display: none; align-items: center; justify-content: center; }
+    .modal-bg.open { display: flex; }
+    .modal-box { background: var(--surf); border: 1px solid var(--red); padding: 20px 22px; max-width: 350px; width: 90%; border-radius: 2px; }
+    .modal-box h3 { font-size: 13px; color: var(--red); margin-bottom: 8px; font-family: var(--mono); font-weight: 700; }
+    .modal-box p  { font-size: 12px; color: var(--dim); margin-bottom: 16px; line-height: 1.6; }
+    .modal-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Toast ────────────────────────────────────────────────────── */
+    #toast-wrap { position: fixed; bottom: 18px; right: 18px; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 7px; pointer-events: none; }
+    .toast { padding: 9px 13px; border: 1px solid; border-radius: 2px; min-width: 250px; max-width: 340px; pointer-events: all; font-family: var(--mono); font-size: 11px; animation: toastIn .2s ease; }
+    @keyframes toastIn { from { transform: translateX(16px); opacity: 0; } to {} }
+    .t-title { font-weight: 700; margin-bottom: 2px; }
+    .t-body  { color: var(--dim); }
+    .toast.canary   { background: var(--surf); border-color: var(--accent); color: var(--accent); }
+    .toast.trap     { background: var(--surf); border-color: var(--red);    color: var(--red); }
+    .toast.critical { background: var(--surf); border-color: var(--red);    color: var(--red); }
+    .toast.info     { background: var(--surf); border-color: var(--blue);   color: var(--blue); }
+
+    /* Row delete animation */
+    @keyframes rowOut { to { opacity: 0; max-height: 0; overflow: hidden; } }
+    .deleting { animation: rowOut .25s forwards; }
     </style>
 </head>
 <body>
-    <!-- Delete confirmation modal -->
-    <div class="modal-overlay" id="delete-modal">
-        <div class="modal-box">
-            <h3>Delete Request?</h3>
-            <p>This will permanently remove the request from the database. This cannot be undone.</p>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="document.getElementById('delete-modal').classList.remove('open')">Cancel</button>
-                <button class="btn btn-primary" style="background:var(--danger);" onclick="executeDelete()">Delete</button>
+
+<!-- Delete confirmation modal -->
+<div class="modal-bg" id="del-modal">
+    <div class="modal-box">
+        <h3>DELETE REQUEST?</h3>
+        <p>This permanently removes the record from the database and cannot be undone.</p>
+        <div class="modal-acts">
+            <button class="hdr-btn" onclick="document.getElementById('del-modal').classList.remove('open')">Cancel</button>
+            <button class="hdr-btn primary" style="border-color:var(--red);color:var(--red)" onclick="execDelete()">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-wrap"></div>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<header class="hdr">
+    <span class="brand">HONEYPOT //</span>
+    <div class="hdr-sep"></div>
+    <nav class="hdr-nav">
+        <a href="{{ admin_path }}/tokens">Canary Tokens</a>
+        <a href="{{ admin_path }}/settings">Settings</a>
+        <a href="{{ admin_path }}/export/json">JSON</a>
+        <a href="{{ admin_path }}/export/csv">CSV</a>
+        <a href="{{ admin_path }}/export/stix">STIX</a>
+    </nav>
+    <div class="hdr-right">
+        <div class="live">
+            <span class="live-dot"></span>
+            <span id="feed-status">connecting…</span>
+        </div>
+        <div class="hdr-sep"></div>
+        <div class="theme-sw" id="theme-sw">
+            <button onclick="setTheme('soc')"   data-t="soc">SOC</button>
+            <button onclick="setTheme('swiss')" data-t="swiss">SWISS</button>
+            <button onclick="setTheme('paper')" data-t="paper">PAPER</button>
+        </div>
+        <div class="hdr-sep"></div>
+        <a href="{{ admin_path }}/logout" class="hdr-btn">Logout</a>
+    </div>
+</header>
+
+<!-- ── Stat bar ─────────────────────────────────────────────────── -->
+<div class="stat-bar">
+    <div class="stat-cell" onclick="filterByCard('clear')">
+        <div class="s-lbl">Total Requests</div>
+        <div class="s-val" id="s-total">{{ stats.total_requests }}</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('clear')">
+        <div class="s-lbl">Unique IPs</div>
+        <div class="s-val" id="s-ips">{{ stats.unique_ips }}</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('text','key:')">
+        <div class="s-lbl">API Keys</div>
+        <div class="s-val amber" id="s-keys">{{ stats.unique_api_keys }}</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('class','credential_stuffer')">
+        <div class="s-lbl">Cred Stuffers</div>
+        <div class="s-val red" id="s-stuffers">{{ stats.classification_breakdown.get('credential_stuffer', 0) }}</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('proto','mcp')">
+        <div class="s-lbl">MCP Probes</div>
+        <div class="s-val purple" id="s-mcp">{{ stats.protocol_breakdown.get('mcp', 0) }}</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('agentic','1')">
+        <div class="s-lbl">Agentic</div>
+        <div class="s-val green" id="s-agent">{{ stats.get('agentic_requests', 0) }}</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('text','canary')">
+        <div class="s-lbl">Canary Hits</div>
+        <div class="s-val amber" id="s-canary">0</div>
+    </div>
+    <div class="stat-cell" onclick="filterByCard('threat','critical')">
+        <div class="s-lbl">High/Critical</div>
+        <div class="s-val red" id="s-critical">{{ stats.get('critical_threats', 0) }}</div>
+    </div>
+</div>
+
+<!-- ── Main layout ───────────────────────────────────────────────── -->
+<div class="layout">
+<div class="main-col">
+
+    <!-- Tactical Threat Map — always visible -->
+    <div class="map-container">
+        <div id="map"></div>
+        <div class="map-vignette"></div>
+        <div class="map-scanlines"></div>
+        <div class="map-chrome">
+            <div class="mc-top">
+                <div class="mc-badge">
+                    <span class="liveDot"></span>
+                    THREAT INTEL // REAL-TIME
+                </div>
+                <div class="mc-chips">
+                    <div class="mc-chip">THREATS <span class="cv red" id="mo-threats">0</span></div>
+                    <div class="mc-chip">UNIQUE IPs <span class="cv" id="mo-ips">0</span></div>
+                    <div class="mc-chip">COUNTRIES <span class="cv grn" id="mo-countries">0</span></div>
+                </div>
+            </div>
+            <div class="mc-bot">
+                <div class="mc-coords" id="map-coords">LAT — &nbsp; LON —</div>
+                <div class="mc-class">UNCLASSIFIED // HONEYPOT INTEL</div>
             </div>
         </div>
     </div>
 
-    <header class="header">
-        <div class="logo">
-            <h1>Console</h1>
-            <span>API Monitor</span>
-            <span class="groq-badge">⚡ Groq AI</span>
-        </div>
-        <div class="header-actions">
-            <div class="refresh-indicator">
-                <span class="refresh-dot"></span>
-                <span id="feed-status" style="color:var(--warning);">Connecting…</span>
+    <!-- 24h Activity chart + Country breakdown side-by-side -->
+    <div style="display:grid;grid-template-columns:1fr 220px;border-bottom:1px solid var(--border);">
+        <div class="chart-wrap" style="border-bottom:none;border-right:1px solid var(--border);">
+            <div class="sec-hdr">
+                <span class="sec-title">24h Activity</span>
+                <span class="sec-sub" id="chart-peak-label"></span>
             </div>
-            <a href="{{ admin_path }}/tokens" class="btn btn-secondary">🎯 Canary Tokens</a>
-            <a href="{{ admin_path }}/settings" class="btn btn-secondary">⚙️ Settings</a>
-            <a href="{{ admin_path }}/export/json" class="btn btn-secondary">Export JSON</a>
-            <a href="{{ admin_path }}/export/csv" class="btn btn-secondary">Export CSV</a>
-            <a href="{{ admin_path }}/logout" class="btn btn-primary">Logout</a>
+            <div class="chart-box"><canvas id="timeline-chart"></canvas></div>
         </div>
-    </header>
+        <div class="chart-wrap" style="border-bottom:none;">
+            <div class="sec-hdr">
+                <span class="sec-title">Top Countries</span>
+                <span class="sec-sub">by requests</span>
+            </div>
+            <div class="chart-box-sm"><canvas id="country-chart"></canvas></div>
+        </div>
+    </div>
 
-    <div class="container">
-        <div class="stats-grid">
-            <div class="stat-card clickable" onclick="filterByCard('clear')">
-                <h3>Total Requests</h3>
-                <div class="stat-value" id="total-requests">{{ stats.total_requests }}</div>
-            </div>
-            <div class="stat-card clickable" onclick="filterByCard('text', 'source_ip')">
-                <h3>Unique IPs</h3>
-                <div class="stat-value" id="unique-ips">{{ stats.unique_ips }}</div>
-            </div>
-            <div class="stat-card clickable" onclick="filterByCard('text', 'key:')">
-                <h3>API Keys Captured</h3>
-                <div class="stat-value" id="unique-keys">{{ stats.unique_api_keys }}</div>
-            </div>
-            <div class="stat-card clickable" onclick="filterByCard('class', 'credential_stuffer')">
-                <h3>Credential Stuffers</h3>
-                <div class="stat-value" id="credential-stuffers">{{ stats.classification_breakdown.get('credential_stuffer', 0) }}</div>
-            </div>
-            <div class="stat-card clickable" style="border-color: rgba(139, 92, 246, 0.4);" onclick="filterByCard('proto', 'mcp')">
-                <h3>MCP Probes</h3>
-                <div class="stat-value" id="mcp-probes" style="color: #a78bfa;">{{ stats.protocol_breakdown.get('mcp', 0) }}</div>
-            </div>
-            <div class="stat-card clickable" style="border-color: rgba(34, 197, 94, 0.4);" onclick="filterByCard('text', 'tool_calls')">
-                <h3>Agentic (tool_calls)</h3>
-                <div class="stat-value" id="agentic-requests" style="color: #4ade80;">{{ stats.get('agentic_requests', 0) }}</div>
-            </div>
-            <div class="stat-card clickable critical" style="border-color: rgba(251, 191, 36, 0.6); background: rgba(251, 191, 36, 0.05);" onclick="filterByCard('text', 'canary')">
-                <h3>🎯 Canary Reuses</h3>
-                <div class="stat-value" id="canary-reuses" style="color: #fbbf24;">0</div>
-            </div>
-            <div class="stat-card clickable critical" onclick="filterByCard('threat', 'critical')">
-                <h3>High/Critical Threats</h3>
-                <div class="stat-value" id="critical-threats">{{ stats.get('critical_threats', 0) }}</div>
-            </div>
-        </div>
+    <!-- Filter bar -->
+    <div class="filter-bar">
+        <input type="text" id="f-text" class="f-in" placeholder="Filter by IP, path, keyword…" oninput="applyFilter()">
+        <select id="f-class" class="f-sel" onchange="applyFilter()">
+            <option value="">All classifications</option>
+            <option value="scanner">scanner</option>
+            <option value="credential_stuffer">credential_stuffer</option>
+            <option value="prompt_harvester">prompt_harvester</option>
+            <option value="data_exfil">data_exfil</option>
+            <option value="recon">recon</option>
+            <option value="researcher">researcher</option>
+            <option value="human">human</option>
+        </select>
+        <select id="f-threat" class="f-sel" onchange="applyFilter()">
+            <option value="">All threats</option>
+            <option value="critical">critical</option>
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+        </select>
+        <select id="f-proto" class="f-sel" onchange="applyFilter()">
+            <option value="">All protocols</option>
+            <option value="openai_api">openai_api</option>
+            <option value="anthropic_api">anthropic_api</option>
+            <option value="mcp">mcp</option>
+            <option value="web">web</option>
+        </select>
+        <button class="f-clr" id="f-agentic-btn" onclick="toggleAgenticFilter()" title="Show only agentic/tool-call requests">🤖 Agentic</button>
+        <button class="f-clr" onclick="clearFilter()">Clear</button>
+        <span class="f-count" id="f-count"></span>
+    </div>
 
-        <div class="content-grid">
-            <div>
-                <div class="panel" style="margin-bottom: 20px;">
-                    <div class="panel-header">
-                        <h2>Attack Sources</h2>
-                    </div>
-                    <div class="panel-body">
-                        <div id="map"></div>
-                    </div>
+    <!-- Request table -->
+    <div class="tbl-wrap">
+    <table class="req-tbl" id="req-tbl">
+        <thead>
+            <tr>
+                <th class="c-time">Time</th>
+                <th class="c-method">Method</th>
+                <th class="c-path">Path</th>
+                <th class="c-ip">IP / Country</th>
+                <th class="c-class">Classification</th>
+                <th class="c-threat">Threat</th>
+                <th class="c-proto">Protocol</th>
+                <th class="c-sig">Signals</th>
+            </tr>
+        </thead>
+        <tbody id="req-tbody">
+        {% for req in recent_requests %}
+        <tr class="rr" data-id="{{ req.id }}" {% if req.has_tool_calls %}data-tool="1"{% endif %} onclick="toggleRow(this)">
+            <td class="mono" title="{{ req.timestamp }}">{{ req.timestamp[11:19] if req.timestamp else '' }}</td>
+            <td><span class="m-{{ req.method|lower }}">{{ req.method }}</span></td>
+            <td class="mono" title="{{ req.path }}">{{ req.path }}</td>
+            <td class="mono">{{ req.source_ip }}{% if req.source_port %}:{{ req.source_port }}{% endif %}{% if req.country_code %} <span style="opacity:.6">{{ req.country_code | country_flag }}</span>{% endif %}</td>
+            <td><span class="cls-{{ req.classification or 'unknown' }}">{{ req.classification or '—' }}{% if req.classification_confidence %} <span style="color:var(--dim);font-size:10px;">({{ (req.classification_confidence*100)|int }}%)</span>{% endif %}</span></td>
+            <td><span class="thr-{{ req.threat_level or 'none' }}">{{ req.threat_level or '—' }}</span></td>
+            <td><span class="proto-tag proto-{{ req.protocol or '' }}">{{ req.protocol or '—' }}</span></td>
+            <td>
+                {% if req.trap_hit %}<span class="sig-pill sig-trap">⚡trap</span> {% endif %}
+                {% if req.is_flagged %}<span class="sig-pill sig-canary">🎯</span> {% endif %}
+                {% if req.agent_type == 'llm_agent' or req.ai_actor_type == 'llm_agent' %}<span class="sig-pill sig-agent">🤖</span> {% endif %}
+                {% if req.has_tool_calls %}<span class="sig-pill sig-tools" onclick="event.stopPropagation();filterByCard('agentic','1')" title="Filter: agentic only" style="cursor:pointer">🤖 tools</span>{% endif %}
+            </td>
+        </tr>
+        {% if req.owasp_categories or req.mitre_atlas_tags or req.cwe_ids %}
+        <tr class="tax-row" data-for="{{ req.id }}">
+            <td colspan="8">
+                <div class="tax-strip">
+                    {% for t in (req.owasp_categories or []) %}<span class="pill pill-owasp pill-sm pill-compact" title="{{ t }}">{{ t|tax_short }}</span>{% endfor %}
+                    {% for t in (req.mitre_atlas_tags or []) %}<span class="pill pill-mitre pill-sm pill-compact" title="{{ t }}">{{ t|tax_short }}</span>{% endfor %}
+                    {% for t in (req.cwe_ids or []) %}<span class="pill pill-cwe pill-sm pill-compact" title="{{ t }}">{{ t|tax_short }}</span>{% endfor %}
                 </div>
-
-                <div class="panel" style="margin-bottom: 20px;">
-                    <div class="panel-header">
-                        <h2>24h Attack Activity</h2>
-                        <span style="font-size:12px;color:var(--text-secondary);">requests per hour</span>
-                    </div>
-                    <div class="panel-body">
-                        <div class="chart-container">
-                            <canvas id="timeline-chart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Live Request Feed</h2>
-                        <span class="refresh-indicator">
-                            <span class="refresh-dot"></span>
-                            Real-time push | Click request for AI analysis
-                        </span>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="filter-input" class="filter-input" placeholder="Filter by IP, path, keyword…" oninput="applyFilter()">
-                        <select id="filter-class" class="filter-select" onchange="applyFilter()">
-                            <option value="">All classifications</option>
-                            <option value="scanner">scanner</option>
-                            <option value="credential_stuffer">credential_stuffer</option>
-                            <option value="prompt_harvester">prompt_harvester</option>
-                            <option value="data_exfil">data_exfil</option>
-                            <option value="recon">recon</option>
-                            <option value="researcher">researcher</option>
-                            <option value="human">human</option>
-                        </select>
-                        <select id="filter-threat" class="filter-select" onchange="applyFilter()">
-                            <option value="">All threats</option>
-                            <option value="critical">critical</option>
-                            <option value="high">high</option>
-                            <option value="medium">medium</option>
-                            <option value="low">low</option>
-                        </select>
-                        <select id="filter-proto" class="filter-select" onchange="applyFilter()">
-                            <option value="">All protocols</option>
-                            <option value="openai_api">openai_api</option>
-                            <option value="anthropic_api">anthropic_api</option>
-                            <option value="mcp">mcp</option>
-                            <option value="web">web</option>
-                        </select>
-                        <button class="filter-clear" onclick="clearFilter()">Clear</button>
-                        <span class="filter-count" id="filter-count"></span>
-                    </div>
-                    <div class="request-feed" id="request-feed">
-                        {% for req in recent_requests %}
-                        <div class="request-item" data-id="{{ req.id }}" onclick="toggleAnalysis(this)">
-                            <div class="request-header">
-                                <div>
-                                    <span class="request-id">#{{ req.id }}</span>
-                                    <span class="request-method {{ req.method }}">{{ req.method }}</span>
-                                </div>
-                                <span class="request-time">{{ req.timestamp }}</span>
-                            </div>
-                            <div class="request-path">{{ req.path }}</div>
-                            <div class="request-meta">
-                                <span class="request-ip">{{ req.source_ip }}</span>
-                                {% if req.country_name %}<span>{{ req.country_name }}</span>{% endif %}
-                                {% if req.protocol %}<span class="badge proto-{{ req.protocol }}">{{ req.protocol }}</span>{% endif %}
-                                {% if req.classification %}<span class="badge {{ req.classification }}">{{ req.classification }}</span>{% endif %}
-                                {% if req.ai_actor_type and req.ai_actor_type != 'unknown' %}<span class="badge actor-{{ req.ai_actor_type }}">🤖 {{ req.ai_actor_type }}</span>{% endif %}
-                                {% if req.agent_type == 'llm_agent' %}<span class="badge actor-llm_agent">🤖 LLM Agent</span>{% endif %}
-                                {% if req.trap_hit %}<span class="badge" style="background:rgba(233,69,96,0.2);color:#e94560;border:1px solid #e94560;">⚡ trap hit</span>{% endif %}
-                                {% if req.has_tool_calls %}<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid #4ade80;">tool_calls</span>{% endif %}
-                                {% if req.is_flagged %}<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24;">🎯 canary</span>{% endif %}
-                                {% if req.framework %}<span class="badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4);">{{ req.framework }}</span>{% endif %}
-                                {% if req.threat_level %}<span class="threat-badge {{ req.threat_level }}">{{ req.threat_level }}</span>{% endif %}
-                            </div>
-                            {% if req.owasp_categories or req.mitre_atlas_tags or req.cwe_ids %}
-                            <div class="taxonomy-inline">
-                                {% for tag in (req.owasp_categories or []) %}
-                                <span class="owasp-tag">{{ tag }}</span>
-                                {% endfor %}
-                                {% for tag in (req.mitre_atlas_tags or []) %}
-                                <span class="mitre-tag">{{ tag }}</span>
-                                {% endfor %}
-                                {% for tag in (req.cwe_ids or []) %}
-                                <span class="cwe-tag">{{ tag }}</span>
-                                {% endfor %}
-                            </div>
+            </td>
+        </tr>
+        {% endif %}
+        <tr class="dr" id="dr-{{ req.id }}">
+            <td class="dr-cell" colspan="8">
+                {% if req.trap_hit %}
+                <div class="trap-banner">⚡ TRAP HIT — {{ req.trap_type or 'unknown' }}{% if req.response_delta_ms %} · Δ{{ req.response_delta_ms|int }}ms{% endif %}</div>
+                {% endif %}
+                <div class="detail-grid">
+                    <div class="detail-block">
+                        <div class="db-title">Request Details</div>
+                        <div class="kv">
+                            <span class="kv-k">Source</span><span class="kv-v">{{ req.source_ip }}{% if req.source_port %}:{{ req.source_port }}{% endif %}</span>
+                            {% if req.city or req.country_name %}
+                            <span class="kv-k">Location</span><span class="kv-v">{% if req.country_code %}{{ req.country_code | country_flag }} {% endif %}{% if req.city %}{{ req.city }}, {% endif %}{{ req.country_name or '' }}</span>
                             {% endif %}
-                            <div class="ai-analysis" id="analysis-{{ req.id }}">
-                                {% if req.trap_hit %}
-                                <div class="trap-hit-banner">⚡ TRAP HIT — {{ req.trap_type or 'unknown' }} trap triggered{% if req.response_delta_ms %} · {{ req.response_delta_ms|int }}ms response delta{% endif %}</div>
-                                {% endif %}
-
-                                <!-- Detail rows: port, location, session, rate, timing, classification -->
-                                <div class="detail-rows">
-                                    <span class="detail-label">Source</span>
-                                    <span class="detail-value">{{ req.source_ip }}{% if req.source_port %}:{{ req.source_port }}{% endif %}</span>
-                                    {% if req.city or req.country_name %}
-                                    <span class="detail-label">Location</span>
-                                    <span class="detail-value">{% if req.country_code %}{{ req.country_code | country_flag }} {% endif %}{% if req.city %}{{ req.city }}, {% endif %}{{ req.country_name or '' }}</span>
-                                    {% endif %}
-                                    {% if req.session_fingerprint %}
-                                    <span class="detail-label">Fingerprint</span>
-                                    <span class="detail-value" style="color:var(--text-secondary);">{{ req.session_fingerprint[:20] }}…</span>
-                                    {% endif %}
-                                    {% if req.response_time_ms is not none %}
-                                    <span class="detail-label">Response</span>
-                                    <span class="detail-value">{{ "%.1f"|format(req.response_time_ms) }} ms</span>
-                                    {% endif %}
-                                    {% if req.classification %}
-                                    <span class="detail-label">Classification</span>
-                                    <span class="detail-value">{{ req.classification | upper }}{% if req.classification_confidence %} ({{ (req.classification_confidence * 100)|int }}% confidence){% endif %}</span>
-                                    {% endif %}
-                                    {% if req.attack_chain_id %}
-                                    <span class="detail-label">Attack Chain</span>
-                                    <span class="detail-value" style="color:var(--text-secondary);">{{ req.attack_chain_id[:20] }}{% if req.attack_stage %} ({{ req.attack_stage }}){% endif %}</span>
-                                    {% endif %}
-                                    {% if req.response_delta_ms %}
-                                    <span class="detail-label">Agent Signal</span>
-                                    <span class="detail-value" style="color:#a78bfa;">Δ{{ req.response_delta_ms|int }}ms</span>
-                                    {% endif %}
-                                </div>
-
-                                {% if req.ai_summary %}
-                                <div class="ai-analysis-header">
-                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                                    Groq AI Analysis
-                                    {% if req.ai_actor_type %}<span class="badge actor-{{ req.ai_actor_type }}" style="font-size:10px;">{{ req.ai_actor_type }}</span>{% endif %}
-                                    {% if req.ai_confidence %}<span style="color:var(--text-secondary);font-size:11px;">{{ (req.ai_confidence * 100)|int }}% confidence</span>{% endif %}
-                                </div>
-                                <div class="ai-summary">{{ req.ai_summary }}</div>
-                                {% if req.ai_details %}<div class="ai-details">{{ req.ai_details }}</div>{% endif %}
-                                {% if req.ai_recommendations %}
-                                <div class="ai-recommendations">
-                                    <h4>Recommendations</h4>
-                                    <ul>
-                                    {% for rec in req.ai_recommendations %}
-                                        <li>{{ rec }}</li>
-                                    {% endfor %}
-                                    </ul>
-                                </div>
-                                {% endif %}
-                                {% if req.ai_iocs %}
-                                <div class="ai-iocs">
-                                    <h4>IOCs</h4>
-                                    <div class="ioc-list">
-                                    {% for ioc in req.ai_iocs %}
-                                        <span class="ioc-pill">{{ ioc }}</span>
-                                    {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                {% else %}
-                                <div class="ai-analysis-header">
-                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                                    AI Analysis
-                                </div>
-                                <div class="ai-summary" style="color: var(--text-secondary);">Analysis pending or not available...</div>
-                                {% endif %}
-
-                                <!-- OWASP / MITRE ATLAS / CWE taxonomy -->
-                                {% if req.owasp_categories %}
-                                <div class="taxonomy-section">
-                                    <h4>OWASP</h4>
-                                    <div class="taxonomy-tags">
-                                    {% for tag in req.owasp_categories %}
-                                        <span class="owasp-tag">{{ tag }}</span>
-                                    {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                {% if req.mitre_atlas_tags %}
-                                <div class="taxonomy-section">
-                                    <h4>MITRE ATLAS</h4>
-                                    <div class="taxonomy-tags">
-                                    {% for tag in req.mitre_atlas_tags %}
-                                        <span class="mitre-tag">{{ tag }}</span>
-                                    {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                {% if req.cwe_ids %}
-                                <div class="taxonomy-section">
-                                    <h4>CWE</h4>
-                                    <div class="taxonomy-tags">
-                                    {% for cwe in req.cwe_ids %}
-                                        <span class="cwe-tag">{{ cwe }}</span>
-                                    {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-
-                                <div class="observables-grid">
-                                    <div class="obs-item">ip: <span>{{ req.source_ip }}</span></div>
-                                    {% if req.model_requested %}<div class="obs-item">model: <span>{{ req.model_requested }}</span></div>{% endif %}
-                                    {% if req.api_key %}<div class="obs-item">key: <span>{{ req.api_key[:14] }}...</span></div>{% endif %}
-                                    {% if req.framework %}<div class="obs-item">framework: <span>{{ req.framework }}</span></div>{% endif %}
-                                    {% if req.attack_stage %}<div class="obs-item">stage: <span>{{ req.attack_stage }}</span></div>{% endif %}
-                                    {% if req.asn_org %}<div class="obs-item">asn: <span>{{ req.asn_org[:30] }}</span></div>{% endif %}
-                                    {% if req.user_agent %}<div class="obs-item" style="grid-column: 1/-1;">ua: <span>{{ req.user_agent[:80] }}</span></div>{% endif %}
-                                    {% if req.notes %}<div class="obs-item" style="grid-column: 1/-1;">note: <span>{{ req.notes }}</span></div>{% endif %}
-                                </div>
-
-                                <!-- Action bar: flag, note, delete -->
-                                <div class="action-bar" onclick="event.stopPropagation()">
-                                    <button class="action-btn {% if req.is_flagged %}flagged{% endif %}"
-                                            id="flag-btn-{{ req.id }}"
-                                            onclick="toggleFlag({{ req.id }}, this)">
-                                        {% if req.is_flagged %}⚑ Flagged{% else %}⚐ Flag{% endif %}
-                                    </button>
-                                    <input type="text" class="note-input" id="note-{{ req.id }}"
-                                           placeholder="Add note…" value="{{ req.notes or '' }}"
-                                           onkeydown="if(event.key==='Enter') saveNote({{ req.id }})">
-                                    <button class="action-btn" onclick="saveNote({{ req.id }})">Save</button>
-                                    <button class="action-btn danger" onclick="confirmDelete({{ req.id }}, this.closest('.request-item'))">🗑 Delete</button>
-                                </div>
-                            </div>
+                            {% if req.asn_org %}<span class="kv-k">ASN</span><span class="kv-v">{{ req.asn_org[:40] }}</span>{% endif %}
+                            {% if req.session_fingerprint %}<span class="kv-k">Fingerprint</span><span class="kv-v" style="color:var(--dim)">{{ req.session_fingerprint[:20] }}…</span>{% endif %}
+                            {% if req.response_time_ms is not none %}<span class="kv-k">Response</span><span class="kv-v">{{ "%.1f"|format(req.response_time_ms) }} ms</span>{% endif %}
+                            {% if req.classification %}<span class="kv-k">Class</span><span class="kv-v cls-{{ req.classification }}">{{ req.classification|upper }}{% if req.classification_confidence %} ({{ (req.classification_confidence*100)|int }}%){% endif %}</span>{% endif %}
+                            {% if req.attack_chain_id %}<span class="kv-k">Chain</span><span class="kv-v" style="color:var(--dim)">{{ req.attack_chain_id[:20] }}{% if req.attack_stage %} ({{ req.attack_stage }}){% endif %}</span>{% endif %}
+                            {% if req.response_delta_ms %}<span class="kv-k">Agent Δ</span><span class="kv-v hi">{{ req.response_delta_ms|int }}ms</span>{% endif %}
+                            {% if req.framework %}<span class="kv-k">Framework</span><span class="kv-v">{{ req.framework }}</span>{% endif %}
+                            {% if req.model_requested %}<span class="kv-k">Model</span><span class="kv-v">{{ req.model_requested }}</span>{% endif %}
+                            {% if req.api_key %}<span class="kv-k">API Key</span><span class="kv-v">{{ req.api_key[:14] }}…</span>{% endif %}
+                            {% if req.user_agent %}<span class="kv-k">UA</span><span class="kv-v" style="color:var(--dim)">{{ req.user_agent[:70] }}</span>{% endif %}
+                            {% if req.notes %}<span class="kv-k">Note</span><span class="kv-v hi">{{ req.notes }}</span>{% endif %}
                         </div>
-                        {% endfor %}
                     </div>
-                </div>
-            </div>
+                    <div class="detail-block">
+                        <div class="db-title">AI Analysis</div>
+                        {% if req.ai_summary %}
+                        <div class="ai-block">
+                            <div class="ai-lbl">Groq{% if req.ai_actor_type %} · {{ req.ai_actor_type }}{% endif %}{% if req.ai_confidence %} · {{ (req.ai_confidence*100)|int }}%{% endif %}</div>
+                            <div class="ai-sum">{{ req.ai_summary }}</div>
+                            {% if req.ai_details %}<div class="ai-det">{{ req.ai_details }}</div>{% endif %}
+                            {% if req.ai_recommendations %}<ul class="rec-list">{% for r in req.ai_recommendations %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+                            {% if req.ai_iocs %}<div class="ioc-list">{% for i in req.ai_iocs %}<span class="ioc">{{ i }}</span>{% endfor %}</div>{% endif %}
+                        </div>
+                        {% else %}
+                        <div class="ai-pend">Analysis pending…</div>
+                        {% endif %}
 
-            <div class="sidebar-panels">
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Threat Levels</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="classification-list" id="threat-list">
-                            {% for level, count in stats.get('threat_levels', {}).items() %}
-                            <li class="classification-item">
-                                <span class="threat-badge {{ level }}">{{ level }}</span>
-                                <span>{{ count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
+                        {% if req.owasp_categories or req.mitre_atlas_tags or req.cwe_ids %}
+                        <div style="margin-top:12px">
+                            {% if req.owasp_categories %}<div class="db-title" style="margin-top:8px">OWASP</div><div class="pill-wrap">{% for t in req.owasp_categories %}<span class="pill pill-owasp pill-compact" title="{{ t }}">{{ t|tax_short }}</span>{% endfor %}</div>{% endif %}
+                            {% if req.mitre_atlas_tags %}<div class="db-title" style="margin-top:8px">MITRE ATLAS</div><div class="pill-wrap">{% for t in req.mitre_atlas_tags %}<span class="pill pill-mitre pill-compact" title="{{ t }}">{{ t|tax_short }}</span>{% endfor %}</div>{% endif %}
+                            {% if req.cwe_ids %}<div class="db-title" style="margin-top:8px">CWE</div><div class="pill-wrap">{% for t in req.cwe_ids %}<span class="pill pill-cwe pill-compact" title="{{ t }}">{{ t|tax_short }}</span>{% endfor %}</div>{% endif %}
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
+                <div class="act-bar" onclick="event.stopPropagation()">
+                    <button class="act-btn {% if req.is_flagged %}flagged{% endif %}" id="flag-{{ req.id }}" onclick="toggleFlag({{ req.id }},this)">{% if req.is_flagged %}⚑ Flagged{% else %}⚐ Flag{% endif %}</button>
+                    <input class="note-in" id="note-{{ req.id }}" placeholder="Add note…" value="{{ req.notes or '' }}" onkeydown="if(event.key==='Enter')saveNote({{ req.id }})">
+                    <button class="act-btn" onclick="saveNote({{ req.id }})">Save</button>
+                    <button class="act-btn danger" onclick="confirmDelete({{ req.id }},this.closest('tr'))">🗑 Delete</button>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
 
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Actor Types (Groq)</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="classification-list" id="actor-type-list">
-                            {% for actor, count in stats.get('actor_type_breakdown', {}).items() %}
-                            <li class="classification-item">
-                                <span class="badge actor-{{ actor }}">{{ actor }}</span>
-                                <span>{{ count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
+</div><!-- /main-col -->
 
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Classifications</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="classification-list" id="classification-list">
-                            {% for class_name, count in stats.classification_breakdown.items() %}
-                            <li class="classification-item">
-                                <span class="badge {{ class_name }}">{{ class_name }}</span>
-                                <span>{{ count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
+<!-- ── Sidebar ──────────────────────────────────────────────────── -->
+<div class="sidebar">
 
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Protocol Breakdown</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="classification-list" id="protocol-list">
-                            {% set proto_colors = {'openai_api': '#60a5fa', 'anthropic_api': '#c084fc', 'mcp': '#a78bfa', 'web': '#94a3b8'} %}
-                            {% for proto, count in stats.get('protocol_breakdown', {}).items() %}
-                            <li class="classification-item">
-                                <span style="font-family: monospace; font-size: 12px; color: {{ proto_colors.get(proto, '#e4e4e4') }};">{{ proto }}</span>
-                                <span>{{ count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Top Countries</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="country-list" id="country-list">
-                            {% for country in stats.top_countries %}
-                            <li class="country-item">
-                                <span class="country-name">
-                                    <span class="country-flag">{{ country.code | country_flag }}</span>
-                                    <span>{{ country.code }}</span>
-                                </span>
-                                <span class="country-count">{{ country.count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Top Endpoints</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="country-list">
-                            {% for path in stats.top_paths %}
-                            <li class="country-item">
-                                <span style="font-family: monospace; font-size: 12px;">{{ path.path }}</span>
-                                <span class="country-count">{{ path.count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-header">
-                        <h2>Top Networks</h2>
-                    </div>
-                    <div class="panel-body">
-                        <ul class="country-list">
-                            {% for org in stats.top_asn_orgs %}
-                            <li class="country-item">
-                                <span style="font-size: 12px;">{{ org.org[:25] }}{% if org.org|length > 25 %}...{% endif %}</span>
-                                <span class="country-count">{{ org.count }}</span>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-            </div>
+    <div class="sb-sec">
+        <div class="sb-hdr">Threat Levels</div>
+        <div id="sb-threats">
+        {% for level, count in stats.get('threat_levels', {}).items() %}
+        <div class="sb-row"><span class="sb-cls thr-{{ level }}">{{ level }}</span><span class="sb-v">{{ count }}</span></div>
+        {% endfor %}
         </div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const map = L.map('map').setView([20, 0], 2);
+    <div class="sb-sec">
+        <div class="sb-hdr">Actor Types</div>
+        <div id="sb-actors">
+        {% for actor, count in stats.get('actor_type_breakdown', {}).items() %}
+        <div class="sb-row"><span class="sb-k">{{ actor }}</span><span class="sb-v">{{ count }}</span></div>
+        {% endfor %}
+        </div>
+    </div>
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap',
-            subdomains: 'abcd',
-            maxZoom: 19
-        }).addTo(map);
+    <div class="sb-sec">
+        <div class="sb-hdr">Classifications</div>
+        <div id="sb-class">
+        {% for cls, count in stats.classification_breakdown.items() %}
+        <div class="sb-row"><span class="sb-cls cls-{{ cls }}">{{ cls }}</span><span class="sb-v">{{ count }}</span></div>
+        {% endfor %}
+        </div>
+    </div>
 
-        const attackIcon = L.divIcon({
-            className: 'attack-marker',
-            html: '<div style="background: #e94560; width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(233, 69, 96, 0.5); box-shadow: 0 0 10px rgba(233, 69, 96, 0.8);"></div>',
-            iconSize: [12, 12],
-            iconAnchor: [6, 6]
+    <div class="sb-sec">
+        <div class="sb-hdr">Protocols</div>
+        <div id="sb-proto">
+        {% for proto, count in stats.get('protocol_breakdown', {}).items() %}
+        <div class="sb-row"><span class="sb-cls proto-tag proto-{{ proto }}">{{ proto }}</span><span class="sb-v">{{ count }}</span></div>
+        {% endfor %}
+        </div>
+    </div>
+
+    <div class="sb-sec">
+        <div class="sb-hdr">Top Countries</div>
+        {% for c in stats.top_countries %}
+        <div class="sb-row"><span class="sb-k">{{ c.code | country_flag }} {{ c.code }}</span><span class="sb-v">{{ c.count }}</span></div>
+        {% endfor %}
+    </div>
+
+    <div class="sb-sec">
+        <div class="sb-hdr">Top Endpoints</div>
+        {% for p in stats.top_paths %}
+        <div class="sb-row"><span class="sb-k mono" style="font-family:var(--mono);font-size:10px;" title="{{ p.path }}">{{ p.path[:22] }}</span><span class="sb-v">{{ p.count }}</span></div>
+        {% endfor %}
+    </div>
+
+    <div class="sb-sec">
+        <div class="sb-hdr">Top Networks</div>
+        {% for o in stats.top_asn_orgs %}
+        <div class="sb-row"><span class="sb-k" title="{{ o.org }}">{{ o.org[:22] }}</span><span class="sb-v">{{ o.count }}</span></div>
+        {% endfor %}
+    </div>
+
+    <div class="sb-sec">
+        <div class="sb-hdr">🪤 Lure Intel</div>
+        <div id="lure-panel" style="color:var(--dim);font-size:11px">Loading…</div>
+    </div>
+
+</div><!-- /sidebar -->
+</div><!-- /layout -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const ADMIN_PATH = '{{ admin_path }}';
+
+// ── Theme switcher ──────────────────────────────────────────────
+function setTheme(name) {
+    document.documentElement.setAttribute('data-theme', name);
+    localStorage.setItem('hp-theme', name);
+    document.querySelectorAll('#theme-sw button').forEach(b => {
+        b.classList.toggle('on', b.dataset.t === name);
+    });
+    // Update chart colors if chart exists
+    if (window.tlChart) updateChartColors();
+    // Re-init map with correct tile style when theme changes
+    if (window.mapObj) {
+        window.mapObj.remove();
+        window.mapObj = null;
+        setTimeout(() => initMap(), 50);
+    }
+}
+// Mark active on load
+(function(){
+    var t = localStorage.getItem('hp-theme') || 'soc';
+    document.querySelectorAll('#theme-sw button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+})();
+
+function getCssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// ── Tactical Map ─────────────────────────────────────────────────
+const MAP_TARGET = { lat: 38.907, lng: -77.037 }; // Honeypot server (DC/VA)
+let mapObj = null;
+
+function initMap() {
+    mapObj = L.map('map', {
+        center: [25, 5],
+        zoom: 2,
+        zoomControl: false,
+        attributionControl: false,
+        minZoom: 1,
+        maxZoom: 10,
+    });
+
+    // Choose tile style based on current theme
+    const _isPaper = (localStorage.getItem('hp-theme') || 'soc') === 'paper';
+    const _tileBase = _isPaper
+        ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+    const _tileOpacity = _isPaper ? 0.75 : 0.80;
+
+    L.tileLayer(_tileBase, {
+        subdomains: 'abcd',
+        maxZoom: 19,
+        opacity: _tileOpacity,
+    }).addTo(mapObj);
+
+    // Tactical overlay (skip on paper — it looks muddy on light tiles)
+    if (!_isPaper) {
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+            subdomains: 'abcd', maxZoom: 19, opacity: 0.10,
+        }).addTo(mapObj);
+    }
+
+    L.control.zoom({ position: 'bottomleft' }).addTo(mapObj);
+
+    // Target (honeypot server) marker
+    _addTargetMarker();
+
+    // Live coordinate readout
+    mapObj.on('mousemove', e => {
+        const el = document.getElementById('map-coords');
+        if (!el) return;
+        const la = e.latlng.lat, lo = e.latlng.lng;
+        el.textContent = `LAT ${Math.abs(la).toFixed(3)}°${la>=0?'N':'S'}  LON ${Math.abs(lo).toFixed(3)}°${lo>=0?'E':'W'}`;
+    });
+
+    loadMapData();
+}
+
+function _addTargetMarker() {
+    const s = 40;
+    const html = `
+        <div style="position:relative;width:${s}px;height:${s}px;display:flex;align-items:center;justify-content:center;">
+            <div style="position:absolute;inset:0;border:1px solid #22c55e;border-radius:50%;opacity:.35;"></div>
+            <div style="position:absolute;width:${s*.65}px;height:${s*.65}px;border:1px solid #22c55e;border-radius:50%;opacity:.55;"></div>
+            <div style="position:absolute;width:${s*.35}px;height:${s*.35}px;border:2px solid #22c55e;border-radius:50%;opacity:.9;"></div>
+            <div style="position:absolute;width:5px;height:5px;background:#22c55e;border-radius:50%;box-shadow:0 0 10px #22c55e,0 0 20px rgba(34,197,94,.5);"></div>
+            <div style="position:absolute;width:${s+10}px;height:1px;background:rgba(34,197,94,.25);"></div>
+            <div style="position:absolute;width:1px;height:${s+10}px;background:rgba(34,197,94,.25);"></div>
+        </div>`;
+    const icon = L.divIcon({ className:'', html, iconSize:[s,s], iconAnchor:[s/2,s/2] });
+    L.marker([MAP_TARGET.lat, MAP_TARGET.lng], { icon, zIndexOffset: 2000, interactive: true })
+        .addTo(mapObj)
+        .bindPopup(_targetPopup());
+}
+
+function _targetPopup() {
+    return `<div style="font-family:var(--mono);font-size:11px;padding:10px 13px;min-width:170px;">
+        <div style="color:var(--green);font-weight:700;font-size:10px;letter-spacing:.08em;margin-bottom:7px;">⬤ HONEYPOT SERVER</div>
+        <div style="color:var(--dim);font-size:10px;">TARGET SYSTEM — ACTIVE</div>
+        <div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);color:var(--dim);font-size:10px;">All arcs converge here</div>
+    </div>`;
+}
+
+async function loadMapData() {
+    if (!mapObj) return;
+    try {
+        const data = await fetch(ADMIN_PATH + '/api/map').then(r => r.json());
+        if (!data || !data.length) return;
+
+        let totalReqs = 0;
+        const ipSet = new Set(), ccSet = new Set();
+
+        data.forEach(p => {
+            if (!p.lat || !p.lng) return;
+            totalReqs += (p.count || 1);
+            if (p.ip)      ipSet.add(p.ip);
+            if (p.country) ccSet.add(p.country);
+
+            const color = _threatColor(p.threat_level || p.classification);
+            const sz    = Math.min(Math.max(Math.sqrt(p.count || 1) * 3.5, 7), 22);
+
+            // Pulsing marker
+            const html = `
+                <div style="position:relative;width:${sz*3}px;height:${sz*3}px;display:flex;align-items:center;justify-content:center;">
+                    <div style="position:absolute;width:${sz}px;height:${sz}px;border-radius:50%;
+                        border:1px solid ${color};animation:ring-out 2.2s ease-out infinite;
+                        animation-delay:${(Math.random()*1.4).toFixed(2)}s;"></div>
+                    <div style="position:absolute;width:${sz}px;height:${sz}px;border-radius:50%;
+                        border:1px solid ${color};animation:ring-out 2.2s ease-out infinite;
+                        animation-delay:${(Math.random()*1.4+0.9).toFixed(2)}s;"></div>
+                    <div style="width:${Math.max(sz*.55,4)}px;height:${Math.max(sz*.55,4)}px;
+                        background:${color};border-radius:50%;z-index:10;
+                        box-shadow:0 0 ${sz}px ${color},0 0 ${sz*2}px rgba(0,0,0,.4);"></div>
+                </div>`;
+            const icon = L.divIcon({ className:'', html, iconSize:[sz*3,sz*3], iconAnchor:[sz*1.5,sz*1.5] });
+
+            L.marker([p.lat, p.lng], { icon, zIndexOffset: 100 })
+                .addTo(mapObj)
+                .bindPopup(_attackPopup(p));
+
+            // Arc to target
+            if (!(Math.abs(p.lat - MAP_TARGET.lat) < 0.5 && Math.abs(p.lng - MAP_TARGET.lng) < 0.5)) {
+                _drawArc(p.lat, p.lng, MAP_TARGET.lat, MAP_TARGET.lng, color, p.count || 1);
+            }
         });
 
-        const ADMIN_PATH = '{{ admin_path }}';
+        // Update overlay counters
+        _setMapStat('mo-threats', totalReqs);
+        _setMapStat('mo-ips',     ipSet.size);
+        _setMapStat('mo-countries', ccSet.size);
 
-        async function loadMapData() {
-            try {
-                const response = await fetch(ADMIN_PATH + '/api/map');
-                const data = await response.json();
-                data.forEach(point => {
-                    if (point.lat && point.lng) {
-                        L.marker([point.lat, point.lng], { icon: attackIcon })
-                            .addTo(map)
-                            .bindPopup(`<strong>${point.ip}</strong><br>${point.city || 'Unknown'}, ${point.country || 'Unknown'}<br>Requests: ${point.count}`);
-                    }
-                });
-            } catch (error) {
-                console.error('Failed to load map data:', error);
-            }
+    } catch(e) { console.warn('Map data error', e); }
+}
+
+function _drawArc(lat1, lng1, lat2, lng2, color, weight) {
+    const steps = 60;
+    const pts   = [];
+    const dist  = Math.sqrt(Math.pow(lat2-lat1,2) + Math.pow(lng2-lng1,2));
+    const arcH  = dist * 0.22;
+
+    for (let i = 0; i <= steps; i++) {
+        const t   = i / steps;
+        const lat = lat1 + (lat2 - lat1) * t;
+        const lng = lng1 + (lng2 - lng1) * t;
+        const h   = Math.sin(Math.PI * t) * arcH;
+        pts.push([lat + h, lng]);
+    }
+
+    const w = Math.min(Math.max(Math.sqrt(weight) * 0.6, 0.8), 2.2);
+    const pl = L.polyline(pts, {
+        color,
+        weight: w,
+        opacity: 0.6,
+        dashArray: '10 5',
+        smoothFactor: 1,
+        className: 'map-arc',
+    }).addTo(mapObj);
+
+    // Animate stroke-dashoffset for marching ants
+    requestAnimationFrame(() => {
+        const el = pl.getElement ? pl.getElement() : null;
+        if (el) {
+            el.style.strokeDasharray  = '10 5';
+            el.style.animation = `arc-march ${1.2 + Math.random() * 0.8}s linear infinite`;
         }
+    });
+}
 
-        function toggleAnalysis(element) {
-            const analysisDiv = element.querySelector('.ai-analysis');
-            const isVisible = analysisDiv.classList.contains('visible');
+function _attackPopup(p) {
+    const flag = _flag(p.country);
+    const color = _threatColor(p.threat_level || p.classification);
+    return `<div style="font-family:var(--mono);font-size:11px;padding:10px 13px;min-width:175px;">
+        <div style="color:${color};font-weight:700;font-size:10px;letter-spacing:.08em;margin-bottom:7px;">⚡ ATTACK SOURCE</div>
+        <div style="color:var(--accent);margin-bottom:4px;font-size:12px;">${esc(p.ip||'—')}</div>
+        <div style="color:var(--text);margin-bottom:3px;">${flag} ${p.city ? esc(p.city)+', ' : ''}${esc(p.country||'—')}</div>
+        ${p.asn_org ? `<div style="color:var(--dim);font-size:10px;">${esc(p.asn_org.slice(0,32))}</div>` : ''}
+        <div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--border);
+            display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:var(--dim);font-size:10px;">REQUESTS</span>
+            <span style="color:${color};font-weight:700;">${p.count||1}</span>
+        </div>
+    </div>`;
+}
 
-            // Hide all others
-            document.querySelectorAll('.ai-analysis.visible').forEach(el => {
-                el.classList.remove('visible');
-                el.closest('.request-item').classList.remove('expanded');
-            });
+function _threatColor(v) {
+    const m = {
+        credential_stuffer:'#dc2626', data_exfil:'#dc2626', critical:'#dc2626', high:'#dc2626',
+        prompt_harvester:'#8b5cf6', scanner:'#ca8a04', recon:'#ea580c', medium:'#ca8a04',
+        researcher:'#3b82f6', low:'#16a34a', human:'#16a34a',
+    };
+    return m[v] || getCssVar('--accent') || '#d97706';
+}
 
-            if (!isVisible) {
-                analysisDiv.classList.add('visible');
-                element.classList.add('expanded');
-            }
-        }
+function _flag(cc) {
+    if (!cc || cc.length !== 2) return '';
+    return [...cc.toUpperCase()].map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)).join('') + ' ';
+}
 
-        function esc(str) {
-            if (!str) return '';
-            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
+function _setMapStat(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
 
-        function renderActorBadge(actorType) {
-            if (!actorType || actorType === 'unknown') return '';
-            const icons = { human: '👤', bot: '🤖', llm_agent: '🤖', researcher: '🔍' };
-            return `<span class="badge actor-${esc(actorType)}">${icons[actorType] || '🤖'} ${esc(actorType)}</span>`;
-        }
+// ── Charts ────────────────────────────────────────────────────────
+let tlChart = null, ctryChart = null;
 
-        function renderRequestItem(req) {
-            const iocs = (req.ai_iocs && req.ai_iocs.length)
-                ? `<div class="ai-iocs"><h4>IOCs</h4><div class="ioc-list">${req.ai_iocs.map(i => `<span class="ioc-pill">${esc(i)}</span>`).join('')}</div></div>`
-                : '';
+function updateChartColors() {
+    const accent = getCssVar('--accent');
+    const dim    = getCssVar('--dim');
+    const line   = getCssVar('--line');
+    if (tlChart) {
+        tlChart.data.datasets[0].backgroundColor = tlChart.data.datasets[0].data.map(v =>
+            v > 50 ? accent : v > 20 ? accent + 'cc' : accent + '55'
+        );
+        tlChart.options.scales.x.ticks.color = dim;
+        tlChart.options.scales.y.ticks.color = dim;
+        tlChart.options.scales.y.grid.color  = line;
+        tlChart.update('none');
+    }
+    if (ctryChart) {
+        ctryChart.options.scales.x.ticks.color = dim;
+        ctryChart.options.scales.y.grid.color  = line;
+        ctryChart.update('none');
+    }
+}
 
-            const recommendations = (req.ai_recommendations && req.ai_recommendations.length)
-                ? `<div class="ai-recommendations"><h4>Recommendations</h4><ul>${req.ai_recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div>`
-                : '';
+async function loadChart() {
+    try {
+        const data   = await fetch(ADMIN_PATH + '/api/timeline').then(r => r.json());
+        const labels = data.map(d => {
+            const h = parseInt((d.hour||'').split(' ')[1] || d.hour || 0);
+            return h === 0 ? '12a' : h < 12 ? h+'a' : h === 12 ? '12p' : (h-12)+'p';
+        });
+        const counts = data.map(d => d.count);
+        const peak   = Math.max(...counts, 0);
+        const peakEl = document.getElementById('chart-peak-label');
+        if (peakEl && peak) peakEl.textContent = `peak ${peak} req/h`;
 
-            const trapBanner = req.trap_hit
-                ? `<div class="trap-hit-banner">⚡ TRAP HIT — ${esc(req.trap_type || 'unknown')} trap triggered${req.response_delta_ms ? ` · ${Math.round(req.response_delta_ms)}ms delta` : ''}</div>`
-                : '';
+        const accent = getCssVar('--accent');
+        const dim    = getCssVar('--dim');
+        const line   = getCssVar('--line');
 
-            // Detail rows
-            const flagEmoji = (cc) => {
-                if (!cc || cc.length !== 2) return '';
-                return [...cc.toUpperCase()].map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)).join('') + ' ';
-            };
-            const detailRows = [
-                `<span class="detail-label">Source</span><span class="detail-value">${esc(req.source_ip)}${req.source_port ? ':' + req.source_port : ''}</span>`,
-                (req.city || req.country_name) ? `<span class="detail-label">Location</span><span class="detail-value">${flagEmoji(req.country_code)}${req.city ? esc(req.city) + ', ' : ''}${esc(req.country_name || '')}</span>` : '',
-                req.session_fingerprint ? `<span class="detail-label">Fingerprint</span><span class="detail-value" style="color:var(--text-secondary)">${esc(req.session_fingerprint.slice(0,20))}…</span>` : '',
-                req.response_time_ms != null ? `<span class="detail-label">Response</span><span class="detail-value">${req.response_time_ms.toFixed(1)} ms</span>` : '',
-                req.classification ? `<span class="detail-label">Classification</span><span class="detail-value">${esc(req.classification.toUpperCase())}${req.classification_confidence ? ` (${Math.round(req.classification_confidence*100)}% confidence)` : ''}</span>` : '',
-                req.attack_chain_id ? `<span class="detail-label">Attack Chain</span><span class="detail-value" style="color:var(--text-secondary)">${esc(req.attack_chain_id.slice(0,20))}${req.attack_stage ? ' (' + esc(req.attack_stage) + ')' : ''}</span>` : '',
-                req.response_delta_ms ? `<span class="detail-label">Agent Signal</span><span class="detail-value" style="color:#a78bfa">Δ${Math.round(req.response_delta_ms)}ms</span>` : '',
-            ].filter(Boolean).join('');
-
-            // OWASP / MITRE / CWE taxonomy
-            const owaspTags = (req.owasp_categories && req.owasp_categories.length)
-                ? `<div class="taxonomy-section"><h4>OWASP</h4><div class="taxonomy-tags">${req.owasp_categories.map(t => `<span class="owasp-tag">${esc(t)}</span>`).join('')}</div></div>`
-                : '';
-            const mitreTags = (req.mitre_atlas_tags && req.mitre_atlas_tags.length)
-                ? `<div class="taxonomy-section"><h4>MITRE ATLAS</h4><div class="taxonomy-tags">${req.mitre_atlas_tags.map(t => `<span class="mitre-tag">${esc(t)}</span>`).join('')}</div></div>`
-                : '';
-            const cweTags = (req.cwe_ids && req.cwe_ids.length)
-                ? `<div class="taxonomy-section"><h4>CWE</h4><div class="taxonomy-tags">${req.cwe_ids.map(t => `<span class="cwe-tag">${esc(t)}</span>`).join('')}</div></div>`
-                : '';
-
-            const analysisBody = req.ai_summary
-                ? `<div class="ai-analysis-header">
-                       <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                       Groq AI Analysis
-                       ${req.ai_actor_type ? renderActorBadge(req.ai_actor_type) : ''}
-                       ${req.ai_confidence ? `<span style="color:var(--text-secondary);font-size:11px;">${Math.round(req.ai_confidence * 100)}% confidence</span>` : ''}
-                   </div>
-                   <div class="ai-summary">${esc(req.ai_summary)}</div>
-                   ${req.ai_details ? `<div class="ai-details">${esc(req.ai_details)}</div>` : ''}
-                   ${recommendations}
-                   ${iocs}`
-                : `<div class="ai-analysis-header">
-                       <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                       AI Analysis
-                   </div>
-                   <div class="ai-summary" style="color: var(--text-secondary);">Analysis pending...</div>`;
-
-            const observables = [
-                `<div class="obs-item">ip: <span>${esc(req.source_ip)}</span></div>`,
-                req.model_requested ? `<div class="obs-item">model: <span>${esc(req.model_requested)}</span></div>` : '',
-                req.api_key ? `<div class="obs-item">key: <span>${esc(req.api_key.slice(0,14))}…</span></div>` : '',
-                req.framework ? `<div class="obs-item">framework: <span>${esc(req.framework)}</span></div>` : '',
-                req.attack_stage ? `<div class="obs-item">stage: <span>${esc(req.attack_stage)}</span></div>` : '',
-                req.asn_org ? `<div class="obs-item">asn: <span>${esc(req.asn_org.slice(0,30))}</span></div>` : '',
-                req.user_agent ? `<div class="obs-item" style="grid-column:1/-1">ua: <span>${esc(req.user_agent.slice(0,80))}</span></div>` : '',
-                req.notes ? `<div class="obs-item" style="grid-column:1/-1">note: <span>${esc(req.notes)}</span></div>` : '',
-            ].filter(Boolean).join('');
-
-            const flagBtnClass = req.is_flagged ? 'action-btn flagged' : 'action-btn';
-            const flagBtnText = req.is_flagged ? '⚑ Flagged' : '⚐ Flag';
-            const actionBar = `
-                <div class="action-bar" onclick="event.stopPropagation()">
-                    <button class="${flagBtnClass}" id="flag-btn-${req.id}" onclick="toggleFlag(${req.id}, this)">${flagBtnText}</button>
-                    <input type="text" class="note-input" id="note-${req.id}" placeholder="Add note…" value="${esc(req.notes || '')}" onkeydown="if(event.key==='Enter') saveNote(${req.id})">
-                    <button class="action-btn" onclick="saveNote(${req.id})">Save</button>
-                    <button class="action-btn danger" onclick="confirmDelete(${req.id}, this.closest('.request-item'))">🗑 Delete</button>
-                </div>`;
-
-            return `
-                <div class="request-item" data-id="${req.id}" onclick="toggleAnalysis(this)">
-                    <div class="request-header">
-                        <div>
-                            <span class="request-id">#${req.id}</span>
-                            <span class="request-method ${esc(req.method)}">${esc(req.method)}</span>
-                        </div>
-                        <span class="request-time">${esc(req.timestamp)}</span>
-                    </div>
-                    <div class="request-path">${esc(req.path)}</div>
-                    <div class="request-meta">
-                        <span class="request-ip">${esc(req.source_ip)}</span>
-                        ${req.country_name ? `<span>${esc(req.country_name)}</span>` : ''}
-                        ${req.protocol ? `<span class="badge proto-${esc(req.protocol)}">${esc(req.protocol)}</span>` : ''}
-                        ${req.classification ? `<span class="badge ${esc(req.classification)}">${esc(req.classification)}</span>` : ''}
-                        ${req.ai_actor_type && req.ai_actor_type !== 'unknown' ? renderActorBadge(req.ai_actor_type) : ''}
-                        ${req.agent_type === 'llm_agent' ? `<span class="badge actor-llm_agent">🤖 LLM Agent</span>` : ''}
-                        ${req.trap_hit ? `<span class="badge" style="background:rgba(233,69,96,0.2);color:#e94560;border:1px solid #e94560;">⚡ trap hit</span>` : ''}
-                        ${req.has_tool_calls ? `<span class="badge" style="background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid #4ade80">tool_calls</span>` : ''}
-                        ${req.is_flagged ? `<span class="badge" style="background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24">🎯 canary</span>` : ''}
-                        ${req.framework ? `<span class="badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4)">${esc(req.framework)}</span>` : ''}
-                        ${req.threat_level ? `<span class="threat-badge ${esc(req.threat_level)}">${esc(req.threat_level)}</span>` : ''}
-                    </div>
-                    ${(req.owasp_categories?.length || req.mitre_atlas_tags?.length || req.cwe_ids?.length) ? `
-                    <div class="taxonomy-inline">
-                        ${(req.owasp_categories||[]).map(t=>`<span class="owasp-tag">${esc(t)}</span>`).join('')}
-                        ${(req.mitre_atlas_tags||[]).map(t=>`<span class="mitre-tag">${esc(t)}</span>`).join('')}
-                        ${(req.cwe_ids||[]).map(t=>`<span class="cwe-tag">${esc(t)}</span>`).join('')}
-                    </div>` : ''}
-                    <div class="ai-analysis" id="analysis-${req.id}">
-                        ${trapBanner}
-                        <div class="detail-rows">${detailRows}</div>
-                        ${analysisBody}
-                        ${owaspTags}${mitreTags}${cweTags}
-                        <div class="observables-grid">${observables}</div>
-                        ${actionBar}
-                    </div>
-                </div>`;
-        }
-
-        // ── Alert toast ───────────────────────────────────────────────────
-        const toastContainer = document.createElement('div');
-        toastContainer.id = 'toast-container';
-        toastContainer.style.cssText = `
-            position: fixed; bottom: 24px; right: 24px; z-index: 9999;
-            display: flex; flex-direction: column-reverse; gap: 10px;
-            pointer-events: none;
-        `;
-        document.body.appendChild(toastContainer);
-
-        function showToast(title, body, level = 'info') {
-            const colors = {
-                canary:   { bg: 'rgba(251,191,36,0.15)',  border: '#fbbf24', icon: '🎯' },
-                trap:     { bg: 'rgba(233,69,96,0.15)',   border: '#e94560', icon: '⚡' },
-                critical: { bg: 'rgba(220,38,38,0.15)',   border: '#dc2626', icon: '🔴' },
-                info:     { bg: 'rgba(96,165,250,0.12)',  border: '#60a5fa', icon: '📡' },
-            };
-            const c = colors[level] || colors.info;
-            const toast = document.createElement('div');
-            toast.style.cssText = `
-                background: ${c.bg}; border: 1px solid ${c.border};
-                border-radius: 10px; padding: 12px 16px; min-width: 280px; max-width: 380px;
-                pointer-events: all; backdrop-filter: blur(8px);
-                box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-                animation: slideIn 0.3s ease;
-            `;
-            toast.innerHTML = `
-                <div style="font-weight:700;font-size:13px;color:${c.border};margin-bottom:4px;">${c.icon} ${esc(title)}</div>
-                <div style="font-size:12px;color:var(--text-secondary);line-height:1.4;">${esc(body)}</div>
-            `;
-            toastContainer.appendChild(toast);
-            setTimeout(() => toast.style.opacity = '0', 4500);
-            setTimeout(() => toast.remove(), 5000);
-        }
-
-        // Inject keyframe animation once
-        if (!document.getElementById('toast-anim')) {
-            const style = document.createElement('style');
-            style.id = 'toast-anim';
-            style.textContent = `@keyframes slideIn { from { transform: translateX(40px); opacity:0; } to { transform: translateX(0); opacity:1; } }`;
-            document.head.appendChild(style);
-        }
-
-        // ── Live feed state ───────────────────────────────────────────────
-        // Map of request_id → rendered row data (so analysis can patch rows)
-        const feedRows = {};
-        const MAX_FEED_ROWS = 100;
-
-        function prependRequestRow(req) {
-            // Track in map
-            feedRows[req.id] = req;
-            // Keep map bounded
-            const ids = Object.keys(feedRows).map(Number).sort((a,b) => a-b);
-            if (ids.length > MAX_FEED_ROWS + 20) {
-                ids.slice(0, ids.length - MAX_FEED_ROWS).forEach(id => delete feedRows[id]);
-            }
-
-            const feed = document.getElementById('request-feed');
-            const html = renderRequestItem(req);
-            feed.insertAdjacentHTML('afterbegin', html);
-
-            // Trim DOM to MAX_FEED_ROWS
-            const children = feed.querySelectorAll('.request-item');
-            if (children.length > MAX_FEED_ROWS) {
-                children[children.length - 1].remove();
-            }
-        }
-
-        function patchAnalysisOnRow(requestId, analysisData) {
-            // Update in-memory row data
-            if (feedRows[requestId]) {
-                Object.assign(feedRows[requestId], analysisData);
-            }
-
-            // Patch the live DOM row
-            const item = document.querySelector(`.request-item[data-id="${requestId}"]`);
-            if (!item) return;
-
-            // Update threat badge in meta row
-            const meta = item.querySelector('.request-meta');
-            if (meta && analysisData.threat_level) {
-                const existing = meta.querySelector('.threat-badge');
-                if (existing) existing.remove();
-                const badge = document.createElement('span');
-                badge.className = `threat-badge ${analysisData.threat_level}`;
-                badge.textContent = analysisData.threat_level;
-                meta.appendChild(badge);
-            }
-            // Update actor badge
-            if (meta && analysisData.ai_actor_type && analysisData.ai_actor_type !== 'unknown') {
-                const existingActor = meta.querySelector('.badge[class*="actor-"]');
-                if (!existingActor) {
-                    meta.insertAdjacentHTML('beforeend', renderActorBadge(analysisData.ai_actor_type));
-                }
-            }
-
-            // Patch analysis panel content if it exists
-            const panel = item.querySelector('.ai-analysis');
-            if (panel && analysisData.ai_summary) {
-                const iocs = (analysisData.ai_iocs && analysisData.ai_iocs.length)
-                    ? `<div class="ai-iocs"><h4>IOCs</h4><div class="ioc-list">${analysisData.ai_iocs.map(i => `<span class="ioc-pill">${esc(i)}</span>`).join('')}</div></div>`
-                    : '';
-                const recs = (analysisData.ai_recommendations && analysisData.ai_recommendations.length)
-                    ? `<div class="ai-recommendations"><h4>Recommendations</h4><ul>${analysisData.ai_recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div>`
-                    : '';
-                // Replace analysis content (keep trap banner + observables)
-                const existingHeader = panel.querySelector('.ai-analysis-header');
-                const existingObs = panel.querySelector('.observables-grid');
-                if (existingHeader) existingHeader.remove();
-                const existingSummary = panel.querySelector('.ai-summary');
-                if (existingSummary) existingSummary.remove();
-                const existingDetails = panel.querySelector('.ai-details');
-                if (existingDetails) existingDetails.remove();
-                const existingRecs = panel.querySelector('.ai-recommendations');
-                if (existingRecs) existingRecs.remove();
-                const existingIocs = panel.querySelector('.ai-iocs');
-                if (existingIocs) existingIocs.remove();
-
-                const insertTarget = panel.querySelector('.trap-hit-banner') || panel.firstChild;
-                const analysisHtml = `
-                    <div class="ai-analysis-header">
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                        Groq AI Analysis
-                        ${analysisData.ai_actor_type ? renderActorBadge(analysisData.ai_actor_type) : ''}
-                        ${analysisData.ai_confidence ? `<span style="color:var(--text-secondary);font-size:11px;">${Math.round(analysisData.ai_confidence*100)}% confidence</span>` : ''}
-                    </div>
-                    <div class="ai-summary">${esc(analysisData.ai_summary)}</div>
-                    ${analysisData.ai_details ? `<div class="ai-details">${esc(analysisData.ai_details)}</div>` : ''}
-                    ${recs}${iocs}`;
-                if (insertTarget) {
-                    insertTarget.insertAdjacentHTML('afterend', analysisHtml);
-                } else {
-                    panel.insertAdjacentHTML('afterbegin', analysisHtml);
-                }
-            }
-        }
-
-        function patchCanaryOnRow(requestId) {
-            const item = document.querySelector(`.request-item[data-id="${requestId}"]`);
-            if (!item) return;
-            const meta = item.querySelector('.request-meta');
-            if (meta && !meta.querySelector('.canary-badge')) {
-                const badge = document.createElement('span');
-                badge.className = 'canary-badge badge';
-                badge.style.cssText = 'background:rgba(251,191,36,0.2);color:#fbbf24;border:1px solid #fbbf24';
-                badge.textContent = '🎯 canary';
-                meta.appendChild(badge);
-            }
-        }
-
-        // ── WebSocket connection ──────────────────────────────────────────
-        let ws = null;
-        let wsReconnectTimer = null;
-        let pollFallbackInterval = null;
-        let wsAlive = false;
-
-        function connectWS() {
-            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            ws = new WebSocket(`${proto}://${location.host}{{ admin_path }}/ws/feed`);
-
-            ws.onopen = () => {
-                wsAlive = true;
-                // Stop poll fallback if WS is healthy
-                if (pollFallbackInterval) {
-                    clearInterval(pollFallbackInterval);
-                    pollFallbackInterval = null;
-                }
-                document.getElementById('feed-status').textContent = 'WebSocket';
-                document.getElementById('feed-status').style.color = 'var(--success)';
-                // Ping every 25s to keep the connection alive through proxies
-                ws._pingInterval = setInterval(() => {
-                    if (ws.readyState === WebSocket.OPEN) ws.send('ping');
-                }, 25000);
-            };
-
-            ws.onmessage = (evt) => {
-                try {
-                    const msg = JSON.parse(evt.data);
-                    handleFeedEvent(msg);
-                } catch(e) {}
-            };
-
-            ws.onclose = ws.onerror = () => {
-                wsAlive = false;
-                if (ws._pingInterval) clearInterval(ws._pingInterval);
-                document.getElementById('feed-status').textContent = 'Polling (5s)';
-                document.getElementById('feed-status').style.color = 'var(--warning)';
-                // Fall back to polling while reconnecting
-                if (!pollFallbackInterval) {
-                    pollFallbackInterval = setInterval(refreshStatsOnly, 5000);
-                }
-                // Reconnect after 3s
-                wsReconnectTimer = setTimeout(connectWS, 3000);
-            };
-        }
-
-        function handleFeedEvent(msg) {
-            switch (msg.type) {
-                case 'request_new':
-                    prependRequestRow(msg.data);
-                    updateStatCounter('total-requests', 1, true);
-                    break;
-
-                case 'request_analysis':
-                    patchAnalysisOnRow(msg.request_id, msg.data);
-                    if (msg.data.threat_level === 'critical' || msg.data.threat_level === 'high') {
-                        updateStatCounter('critical-threats', 1, true);
-                        if (msg.data.threat_level === 'critical') {
-                            showToast(
-                                `Critical threat #${msg.request_id}`,
-                                msg.data.ai_summary || msg.data.threat_type || '',
-                                'critical'
-                            );
+        tlChart = new Chart(document.getElementById('timeline-chart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: counts.map(v => v > 50 ? accent : v > 20 ? accent+'cc' : accent+'55'),
+                    borderColor: 'transparent',
+                    borderRadius: 3,
+                    borderSkipped: false,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: { duration: 400, easing: 'easeOutQuart' },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        titleColor: accent,
+                        bodyColor: dim,
+                        padding: 8,
+                        cornerRadius: 2,
+                        callbacks: {
+                            title: i => data[i[0].dataIndex]?.hour || '',
+                            label: i => ` ${i.raw} request${i.raw !== 1 ? 's' : ''}`,
                         }
                     }
-                    break;
-
-                case 'canary_hit':
-                    patchCanaryOnRow(msg.request_id);
-                    updateStatCounter('canary-reuses', 1, true);
-                    showToast(
-                        `🎯 Canary key reused! #${msg.request_id}`,
-                        `${msg.data.source_ip} (${msg.data.country || '?'}) → ${msg.data.path}`,
-                        'canary'
-                    );
-                    break;
-
-                case 'trap_hit':
-                    showToast(
-                        `⚡ Agent trap hit! #${msg.request_id}`,
-                        `${msg.data.trap_type} — ${msg.data.source_ip} → ${msg.data.path}`,
-                        'trap'
-                    );
-                    break;
-            }
-        }
-
-        function updateStatCounter(id, delta, increment = false) {
-            const el = document.getElementById(id);
-            if (!el) return;
-            if (increment) {
-                el.textContent = (parseInt(el.textContent || '0', 10) + delta).toString();
-            } else {
-                el.textContent = delta.toString();
-            }
-        }
-
-        // ── Polling fallback (stats + sidebar panels only, not feed) ──────
-        async function refreshStatsOnly() {
-            try {
-                const res = await fetch(ADMIN_PATH + '/api/stats');
-                const stats = await res.json();
-                updateStatCounter('total-requests', stats.total_requests);
-                updateStatCounter('unique-ips', stats.unique_ips);
-                updateStatCounter('unique-keys', stats.unique_api_keys);
-                updateStatCounter('credential-stuffers', stats.classification_breakdown?.credential_stuffer || 0);
-                updateStatCounter('critical-threats', stats.critical_threats || 0);
-                updateStatCounter('mcp-probes', stats.protocol_breakdown?.mcp || 0);
-                updateStatCounter('agentic-requests', stats.agentic_requests || 0);
-
-                // Actor type breakdown panel
-                const actorList = document.getElementById('actor-type-list');
-                if (actorList && stats.actor_type_breakdown) {
-                    const actorIcons = { human: '👤', bot: '🤖', llm_agent: '🤖', researcher: '🔍', unknown: '❓' };
-                    actorList.innerHTML = Object.entries(stats.actor_type_breakdown)
-                        .sort((a,b) => b[1]-a[1])
-                        .map(([actor, count]) => `
-                            <li class="classification-item">
-                                <span class="badge actor-${actor}">${actorIcons[actor] || '🤖'} ${actor}</span>
-                                <span>${count}</span>
-                            </li>`).join('');
-                }
-                // Protocol breakdown panel
-                const protoList = document.getElementById('protocol-list');
-                if (protoList && stats.protocol_breakdown) {
-                    const protoColors = {openai_api:'#60a5fa', anthropic_api:'#c084fc', mcp:'#a78bfa', web:'#94a3b8'};
-                    protoList.innerHTML = Object.entries(stats.protocol_breakdown)
-                        .sort((a,b) => b[1]-a[1])
-                        .map(([proto, count]) => `
-                            <li class="classification-item">
-                                <span style="font-family:monospace;font-size:12px;color:${protoColors[proto]||'#e4e4e4'}">${proto}</span>
-                                <span>${count}</span>
-                            </li>`).join('');
-                }
-            } catch(e) {}
-        }
-
-        // ── Full page refresh (initial load on reconnect) ─────────────────
-        async function refreshData() {
-            try {
-                await refreshStatsOnly();
-
-                const canaryCount = (await fetch(ADMIN_PATH + '/api/requests?limit=500')
-                    .then(r => r.json()).catch(() => []))
-                    .filter(r => r.is_flagged).length;
-                updateStatCounter('canary-reuses', canaryCount);
-
-                const requests = await fetch(ADMIN_PATH + '/api/requests?limit=100')
-                    .then(r => r.json());
-                const feed = document.getElementById('request-feed');
-                feed.innerHTML = requests.map(req => renderRequestItem(req)).join('');
-                requests.forEach(req => { feedRows[req.id] = req; });
-                applyFilter();
-            } catch(e) {}
-        }
-
-        // ── 24h Activity Chart ─────────────────────────────────────────────
-        let timelineChart = null;
-        const timelineHourlyCounts = {};
-
-        function initTimelineChart(data) {
-            const ctx = document.getElementById('timeline-chart').getContext('2d');
-
-            const labels = data.map(d => {
-                const h = parseInt(d.hour.split(' ')[1].split(':')[0]);
-                return h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`;
-            });
-            const counts = data.map(d => d.count);
-
-            // Store for live updates
-            data.forEach((d, i) => { timelineHourlyCounts[d.hour] = i; });
-
-            const gradient = ctx.createLinearGradient(0, 0, 0, 160);
-            gradient.addColorStop(0, 'rgba(233, 69, 96, 0.35)');
-            gradient.addColorStop(1, 'rgba(233, 69, 96, 0.02)');
-
-            timelineChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [{
-                        data: counts,
-                        backgroundColor: counts.map(c =>
-                            c === 0 ? 'rgba(100,100,150,0.15)' :
-                            c > 50  ? 'rgba(220,38,38,0.85)' :
-                            c > 20  ? 'rgba(233,69,96,0.7)' :
-                                      'rgba(233,69,96,0.45)'
-                        ),
-                        borderColor: 'transparent',
-                        borderRadius: 3,
-                        borderSkipped: false,
-                    }],
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: { duration: 400 },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(15,15,26,0.95)',
-                            borderColor: 'rgba(100,100,150,0.3)',
-                            borderWidth: 1,
-                            titleColor: '#e4e4e4',
-                            bodyColor: '#888',
-                            callbacks: {
-                                title: (items) => `Hour: ${data[items[0].dataIndex]?.hour || ''}`,
-                                label: (item) => ` ${item.raw} request${item.raw !== 1 ? 's' : ''}`,
-                            },
-                        },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: { color: dim, font: { size: 9, family: 'inherit' }, maxRotation: 0, maxTicksLimit: 12 }
                     },
-                    scales: {
-                        x: {
-                            grid: { display: false },
-                            border: { display: false },
-                            ticks: {
-                                color: '#666',
-                                font: { size: 10 },
-                                maxRotation: 0,
-                                maxTicksLimit: 12,
-                            },
-                        },
-                        y: {
-                            grid: { color: 'rgba(100,100,150,0.08)' },
-                            border: { display: false },
-                            ticks: { color: '#666', font: { size: 10 }, maxTicksLimit: 4 },
-                        },
+                    y: {
+                        grid: { color: line, drawBorder: false },
+                        border: { display: false },
+                        ticks: { color: dim, font: { size: 9 }, maxTicksLimit: 4 },
+                        beginAtZero: true,
                     },
                 },
-            });
-        }
-
-        async function loadTimelineChart() {
-            try {
-                const data = await fetch(ADMIN_PATH + '/api/timeline').then(r => r.json());
-                initTimelineChart(data);
-            } catch(e) { console.error('Chart load failed', e); }
-        }
-
-        function bumpTimelineCurrentHour() {
-            if (!timelineChart) return;
-            // Bump the last bar (current hour)
-            const ds = timelineChart.data.datasets[0];
-            const last = ds.data.length - 1;
-            ds.data[last] = (ds.data[last] || 0) + 1;
-            // Re-colour the bar
-            const v = ds.data[last];
-            ds.backgroundColor[last] =
-                v > 50 ? 'rgba(220,38,38,0.85)' :
-                v > 20 ? 'rgba(233,69,96,0.7)' :
-                         'rgba(233,69,96,0.45)';
-            timelineChart.update('none');
-        }
-
-        // Patch handleFeedEvent to also bump the chart
-        const _origHandleFeedEvent = handleFeedEvent;
-        handleFeedEvent = function(msg) {
-            _origHandleFeedEvent(msg);
-            if (msg.type === 'request_new') bumpTimelineCurrentHour();
-        };
-
-        // ── Feed filter ────────────────────────────────────────────────────
-        function applyFilter() {
-            const text  = (document.getElementById('filter-input')?.value || '').toLowerCase();
-            const cls   = (document.getElementById('filter-class')?.value || '').toLowerCase();
-            const threat= (document.getElementById('filter-threat')?.value || '').toLowerCase();
-            const proto = (document.getElementById('filter-proto')?.value || '').toLowerCase();
-
-            let visible = 0;
-            document.querySelectorAll('#request-feed .request-item').forEach(item => {
-                const content = item.textContent.toLowerCase();
-                const show =
-                    (!text   || content.includes(text))   &&
-                    (!cls    || content.includes(cls))     &&
-                    (!threat || content.includes(threat))  &&
-                    (!proto  || content.includes(proto));
-                item.style.display = show ? '' : 'none';
-                if (show) visible++;
-            });
-            const total = document.querySelectorAll('#request-feed .request-item').length;
-            const countEl = document.getElementById('filter-count');
-            if (countEl) {
-                countEl.textContent = (text || cls || threat || proto)
-                    ? `${visible} / ${total} shown`
-                    : `${total} requests`;
-            }
-        }
-
-        function clearFilter() {
-            const fi = document.getElementById('filter-input');
-            const fc = document.getElementById('filter-class');
-            const ft = document.getElementById('filter-threat');
-            const fp = document.getElementById('filter-proto');
-            if (fi) fi.value = '';
-            if (fc) fc.value = '';
-            if (ft) ft.value = '';
-            if (fp) fp.value = '';
-            applyFilter();
-        }
-
-        // Re-apply filter after new rows are prepended
-        const _origPrepend = prependRequestRow;
-        prependRequestRow = function(req) {
-            _origPrepend(req);
-            applyFilter();
-        };
-
-        // ── Stat card click-through filter ───────────────────────────────
-        function filterByCard(type, value) {
-            const fi = document.getElementById('filter-input');
-            const fc = document.getElementById('filter-class');
-            const ft = document.getElementById('filter-threat');
-            const fp = document.getElementById('filter-proto');
-
-            // Reset all
-            if (fi) fi.value = '';
-            if (fc) fc.value = '';
-            if (ft) ft.value = '';
-            if (fp) fp.value = '';
-
-            if (type === 'clear') {
-                // nothing more to do — all cleared
-            } else if (type === 'class' && fc) {
-                fc.value = value;
-            } else if (type === 'proto' && fp) {
-                fp.value = value;
-            } else if (type === 'threat' && ft) {
-                ft.value = value;
-            } else if (type === 'text' && fi) {
-                fi.value = value;
-            }
-            applyFilter();
-            document.getElementById('request-feed').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-
-        // ── Delete request ────────────────────────────────────────────────
-        let _deleteTarget = null;
-
-        function confirmDelete(id, el) {
-            _deleteTarget = { id, el };
-            document.getElementById('delete-modal').classList.add('open');
-        }
-
-        async function executeDelete() {
-            document.getElementById('delete-modal').classList.remove('open');
-            if (!_deleteTarget) return;
-            const { id, el } = _deleteTarget;
-            _deleteTarget = null;
-            try {
-                const res = await fetch(`${ADMIN_PATH}/api/requests/${id}`, { method: 'DELETE' });
-                if (res.ok) {
-                    el.classList.add('deleting');
-                    setTimeout(() => el.remove(), 320);
-                    delete feedRows[id];
-                    applyFilter();
-                }
-            } catch(e) { console.error('Delete failed', e); }
-        }
-
-        // Close modal on overlay click
-        document.getElementById('delete-modal').addEventListener('click', function(e) {
-            if (e.target === this) this.classList.remove('open');
+            },
         });
+    } catch(e) {}
+}
 
-        // ── Flag / unflag a request ───────────────────────────────────────
-        async function toggleFlag(id, btn) {
-            const isFlagged = btn.classList.contains('flagged');
-            try {
-                const res = await fetch(`${ADMIN_PATH}/api/requests/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_flagged: !isFlagged }),
-                });
-                if (res.ok) {
-                    btn.classList.toggle('flagged');
-                    btn.textContent = isFlagged ? '⚐ Flag' : '⚑ Flagged';
-                    // Update in-memory row
-                    if (feedRows[id]) feedRows[id].is_flagged = !isFlagged;
-                }
-            } catch(e) { console.error('Flag failed', e); }
+async function loadCountryChart() {
+    try {
+        const stats = await fetch(ADMIN_PATH + '/api/stats').then(r => r.json());
+        const countries = (stats.top_countries || []).slice(0, 6);
+        if (!countries.length) return;
+
+        const labels = countries.map(c => c.code || '??');
+        const counts = countries.map(c => c.count);
+        const accent = getCssVar('--accent');
+        const dim    = getCssVar('--dim');
+        const line   = getCssVar('--line');
+
+        ctryChart = new Chart(document.getElementById('country-chart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: [accent+'ee', accent+'cc', accent+'aa', accent+'88', accent+'66', accent+'44'],
+                    borderColor: 'transparent',
+                    borderRadius: 3,
+                    borderSkipped: false,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                animation: { duration: 400 },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        titleColor: accent,
+                        bodyColor: dim,
+                        padding: 8, cornerRadius: 2,
+                        callbacks: { label: i => ` ${i.raw} req${i.raw !== 1 ? 's' : ''}` }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: line }, border: { display: false },
+                        ticks: { color: dim, font: { size: 9 }, maxTicksLimit: 4 },
+                        beginAtZero: true,
+                    },
+                    y: {
+                        grid: { display: false }, border: { display: false },
+                        ticks: { color: accent, font: { size: 10, weight: '700', family: 'var(--mono)' } }
+                    },
+                },
+            },
+        });
+    } catch(e) {}
+}
+
+function bumpChart() {
+    if (!tlChart) return;
+    const ds   = tlChart.data.datasets[0];
+    const last = ds.data.length - 1;
+    ds.data[last] = (ds.data[last] || 0) + 1;
+    const v = ds.data[last];
+    const a = getCssVar('--accent');
+    ds.backgroundColor[last] = v > 50 ? a : v > 20 ? a+'cc' : a+'55';
+    tlChart.update('none');
+}
+
+// ── Row rendering helpers ─────────────────────────────────────────
+function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function flag(cc) {
+    if (!cc || cc.length !== 2) return '';
+    return [...cc.toUpperCase()].map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)).join('') + ' ';
+}
+function methodCls(m) { return {GET:'m-get',POST:'m-post',DELETE:'m-del',PUT:'m-put',PATCH:'m-put'}[(m||'').toUpperCase()] || 'm-other'; }
+function timeStr(ts) { return ts ? String(ts).substring(11,19) : ''; }
+function thrCls(t) { return t ? 'thr-'+t : 'thr-none'; }
+function clsCls(c) { return 'cls-'+(c||'unknown'); }
+function protoCls(p) { return 'proto-tag proto-'+(p||''); }
+
+// Extract a short code from a verbose taxonomy string
+// "MITRE-ATLAS:AML.T0086 Exfiltration via..." → "AML.T0086"
+// "OWASP-Agentic:Tool Misuse / Excessive Agency" → "Tool Misuse"
+// "CWE-610: Externally Controlled Reference..." → "CWE-610"
+function taxShort(t) {
+    // CWE-NNN: …
+    let m = t.match(/^(CWE-\d+)/);
+    if (m) return m[1];
+    // MITRE-ATLAS:AML.TXXXX or AML.MXXXX
+    m = t.match(/:(AML\.[A-Z]\d+)/);
+    if (m) return m[1];
+    // OWASP-LLM:LLM01 or OWASP-Agentic:Tag Name
+    m = t.match(/:(LLM\d+[^:]*)/);
+    if (m) return m[1].split(' ')[0]; // "LLM01"
+    // After colon — grab up to 20 chars
+    m = t.match(/:(.+)/);
+    if (m) return m[1].replace(/\s*\/.*/, '').trim().slice(0, 22);
+    return t.slice(0, 22);
+}
+
+function renderTaxInline(req) {
+    const owaspArr = req.owasp_categories||[];
+    const mitreArr = req.mitre_atlas_tags||[];
+    const cweArr   = req.cwe_ids||[];
+    if (!owaspArr.length && !mitreArr.length && !cweArr.length) return '';
+
+    const owasp = owaspArr.map(t=>`<span class="pill pill-owasp pill-sm pill-compact" title="${esc(t)}">${esc(taxShort(t))}</span>`).join('');
+    const mitre = mitreArr.map(t=>`<span class="pill pill-mitre pill-sm pill-compact" title="${esc(t)}">${esc(taxShort(t))}</span>`).join('');
+    const cwe   = cweArr.map(t=>`<span class="pill pill-cwe pill-sm pill-compact" title="${esc(t)}">${esc(taxShort(t))}</span>`).join('');
+    return `<tr class="tax-row" data-for="${req.id}"><td colspan="8"><div class="tax-strip">${owasp}${mitre}${cwe}</div></td></tr>`;
+}
+
+function renderDetailRow(req) {
+    const trapBanner = req.trap_hit
+        ? `<div class="trap-banner">⚡ TRAP HIT — ${esc(req.trap_type||'unknown')}${req.response_delta_ms ? ' · Δ'+Math.round(req.response_delta_ms)+'ms' : ''}</div>` : '';
+
+    // KV pairs — left column
+    const kvLeft = [
+        ['Source',      `${esc(req.source_ip)}${req.source_port ? ':'+req.source_port : ''}`],
+        (req.city||req.country_name) ? ['Location', `${flag(req.country_code)}${req.city ? esc(req.city)+', ' : ''}${esc(req.country_name||'')}`] : null,
+        req.asn_org    ? ['ASN',         esc(req.asn_org.slice(0,40))]  : null,
+        req.session_fingerprint ? ['Fingerprint', `<span style="color:var(--dim)">${esc(req.session_fingerprint.slice(0,20))}…</span>`] : null,
+        req.response_time_ms != null ? ['Response', req.response_time_ms.toFixed(1)+' ms'] : null,
+        req.classification ? ['Class', `<span class="${clsCls(req.classification)}">${esc(req.classification.toUpperCase())}${req.classification_confidence ? ' ('+Math.round(req.classification_confidence*100)+'%)' : ''}</span>`] : null,
+        req.attack_chain_id ? ['Chain', `<span style="color:var(--dim)">${esc(req.attack_chain_id.slice(0,20))}${req.attack_stage ? ' ('+esc(req.attack_stage)+')' : ''}</span>`] : null,
+        req.response_delta_ms ? ['Agent Δ', `<span class="kv-v hi">${Math.round(req.response_delta_ms)}ms</span>`] : null,
+        req.framework  ? ['Framework',  esc(req.framework)]  : null,
+        req.model_requested ? ['Model', esc(req.model_requested)] : null,
+        req.api_key    ? ['API Key',    esc(req.api_key.slice(0,14))+'…'] : null,
+        req.user_agent ? ['UA',         `<span style="color:var(--dim)">${esc(req.user_agent.slice(0,70))}</span>`] : null,
+        req.notes      ? ['Note',       `<span class="kv-v hi">${esc(req.notes)}</span>`] : null,
+    ].filter(Boolean).map(([k,v]) => `<span class="kv-k">${esc(k)}</span><span class="kv-v">${v}</span>`).join('');
+
+    // Classification reasons — why was this classified this way (or unknown)?
+    const reasons = req.classification_reasons;
+    const reasonsBlock = (Array.isArray(reasons) && reasons.length)
+        ? `<div class="db-title" style="margin-top:10px">WHY THIS CLASSIFICATION</div><div class="reason-list">${reasons.map(r=>typeof r==='string'?`<div class="reason-item">${esc(r)}</div>`:`<div class="reason-item"><b>${esc(r.rule||r.key||'')}</b>${r.value!==undefined?' = '+esc(String(r.value)):''}${r.score!==undefined?' ('+r.score+')':''}</div>`).join('')}</div>`
+        : (req.classification === 'unknown' || !req.classification)
+            ? `<div class="db-title" style="margin-top:10px">WHY UNKNOWN</div><div class="reason-list"><div class="reason-item dim">No matching classifier rules. Use ⚡ Analyze Now for AI classification, or manually set above.</div></div>`
+            : '';
+
+    // AI analysis — right column
+    const iocs = (req.ai_iocs||[]).length ? `<div class="ioc-list">${(req.ai_iocs||[]).map(i=>`<span class="ioc">${esc(i)}</span>`).join('')}</div>` : '';
+    const recs = (req.ai_recommendations||[]).length ? `<ul class="rec-list">${(req.ai_recommendations||[]).map(r=>`<li>${esc(r)}</li>`).join('')}</ul>` : '';
+    const aiBlock = req.ai_summary
+        ? `<div class="ai-block" id="aiblock-${req.id}"><div class="ai-lbl">Groq${req.ai_actor_type ? ' · '+esc(req.ai_actor_type) : ''}${req.ai_confidence ? ' · '+Math.round(req.ai_confidence*100)+'%' : ''}</div><div class="ai-sum">${esc(req.ai_summary)}</div>${req.ai_details ? `<div class="ai-det">${esc(req.ai_details)}</div>` : ''}${recs}${iocs}</div>`
+        : `<div class="ai-pend" id="aipend-${req.id}">Analysis pending <button class="act-btn" style="margin-left:8px;padding:2px 8px;font-size:10px" onclick="analyzeNow(${req.id},this)">⚡ Analyze Now</button></div>`;
+
+    // Taxonomy (right column) — compact chips with full text on hover
+    const owaspBlock = (req.owasp_categories||[]).length ? `<div class="db-title" style="margin-top:10px">OWASP</div><div class="pill-wrap">${(req.owasp_categories||[]).map(t=>`<span class="pill pill-owasp pill-compact" title="${esc(t)}">${esc(taxShort(t))}</span>`).join('')}</div>` : '';
+    const mitreBlock = (req.mitre_atlas_tags||[]).length ? `<div class="db-title" style="margin-top:8px">MITRE ATLAS</div><div class="pill-wrap">${(req.mitre_atlas_tags||[]).map(t=>`<span class="pill pill-mitre pill-compact" title="${esc(t)}">${esc(taxShort(t))}</span>`).join('')}</div>` : '';
+    const cweBlock   = (req.cwe_ids||[]).length          ? `<div class="db-title" style="margin-top:8px">CWE</div><div class="pill-wrap">${(req.cwe_ids||[]).map(t=>`<span class="pill pill-cwe pill-compact" title="${esc(t)}">${esc(taxShort(t))}</span>`).join('')}</div>` : '';
+
+    const flagCls = req.is_flagged ? 'act-btn flagged' : 'act-btn';
+    const flagTxt = req.is_flagged ? '⚑ Flagged' : '⚐ Flag';
+    const CLS_OPTIONS = ['scanner','credential_stuffer','prompt_harvester','data_exfil','recon','researcher','human','unknown'];
+    const THR_OPTIONS = ['critical','high','medium','low'];
+    const clsSel = `<select class="reclassify-sel" id="cls-${req.id}" onchange="reclassify(${req.id},'classification',this.value,this)">
+        ${CLS_OPTIONS.map(c=>`<option value="${c}"${c===req.classification?' selected':''}>${c}</option>`).join('')}
+    </select>`;
+    const thrSel = `<select class="reclassify-sel" id="thr-${req.id}" onchange="reclassify(${req.id},'threat_level',this.value,this)">
+        <option value="">— threat —</option>
+        ${THR_OPTIONS.map(t=>`<option value="${t}"${t===req.threat_level?' selected':''}>${t}</option>`).join('')}
+    </select>`;
+    const analyzeBtn = req.ai_summary
+        ? `<button class="act-btn" onclick="analyzeNow(${req.id},this)">⚡ Re-analyze</button>`
+        : `<button class="act-btn" onclick="analyzeNow(${req.id},this)">⚡ Analyze Now</button>`;
+    const actBar  = `<div class="act-bar" onclick="event.stopPropagation()">
+        <button class="${flagCls}" id="flag-${req.id}" onclick="toggleFlag(${req.id},this)">${flagTxt}</button>
+        ${clsSel}${thrSel}${analyzeBtn}
+        <input class="note-in" id="note-${req.id}" placeholder="Add note…" value="${esc(req.notes||'')}" onkeydown="if(event.key==='Enter')saveNote(${req.id})">
+        <button class="act-btn" onclick="saveNote(${req.id})">Save</button>
+        <button class="act-btn danger" onclick="confirmDelete(${req.id},this.closest('tr'))">🗑 Delete</button>
+    </div>`;
+
+    return `<tr class="dr" id="dr-${req.id}"><td class="dr-cell" colspan="8">
+        ${trapBanner}
+        <div class="detail-grid">
+            <div class="detail-block"><div class="db-title">Request Details</div><div class="kv">${kvLeft}</div>${reasonsBlock}</div>
+            <div class="detail-block"><div class="db-title">AI Analysis</div>${aiBlock}${owaspBlock||mitreBlock||cweBlock ? '<div>'+owaspBlock+mitreBlock+cweBlock+'</div>' : ''}</div>
+        </div>
+        ${actBar}
+    </td></tr>`;
+}
+
+function renderRow(req) {
+    const sigs = [
+        req.trap_hit ? `<span class="sig-pill sig-trap">⚡trap</span>` : '',
+        req.is_flagged ? `<span class="sig-pill sig-canary">🎯</span>` : '',
+        (req.agent_type==='llm_agent'||req.ai_actor_type==='llm_agent') ? `<span class="sig-pill sig-agent">🤖</span>` : '',
+        req.has_tool_calls ? `<span class="sig-pill sig-tools" onclick="event.stopPropagation();filterByCard('agentic','1')" title="Filter: agentic only" style="cursor:pointer">🤖 tools</span>` : '',
+    ].filter(Boolean).join(' ');
+
+    const conf = req.classification_confidence ? ` <span style="color:var(--dim);font-size:10px">(${Math.round(req.classification_confidence*100)}%)</span>` : '';
+
+    return `<tr class="rr" data-id="${req.id}"${req.has_tool_calls?' data-tool="1"':''} onclick="toggleRow(this)">
+        <td class="mono" title="${esc(req.timestamp)}">${esc(timeStr(req.timestamp))}</td>
+        <td><span class="${methodCls(req.method)}">${esc(req.method)}</span></td>
+        <td class="mono" title="${esc(req.path)}">${esc(req.path)}</td>
+        <td class="mono">${esc(req.source_ip)}${req.source_port ? ':'+req.source_port : ''} <span style="opacity:.6">${flag(req.country_code)}</span></td>
+        <td><span class="${clsCls(req.classification)}">${esc(req.classification||'—')}${conf}</span></td>
+        <td><span class="${thrCls(req.threat_level)}">${esc(req.threat_level||'—')}</span></td>
+        <td><span class="${protoCls(req.protocol)}">${esc(req.protocol||'—')}</span></td>
+        <td>${sigs}</td>
+    </tr>${renderTaxInline(req)}${renderDetailRow(req)}`;
+}
+
+// ── Row toggle (expand/collapse) ─────────────────────────────────
+function toggleRow(rr) {
+    const id  = rr.dataset.id;
+    const dr  = document.getElementById('dr-'+id);
+    if (!dr) return;
+    const open = dr.classList.toggle('open');
+    rr.classList.toggle('expanded', open);
+    // close others
+    if (open) {
+        document.querySelectorAll('#req-tbody .dr.open').forEach(el => {
+            if (el !== dr) { el.classList.remove('open'); el.previousElementSibling?.classList?.remove('expanded'); }
+        });
+    }
+}
+
+// ── Feed state ───────────────────────────────────────────────────
+const feedRows = {};
+const MAX_ROWS = 200;
+
+function prependRow(req) {
+    feedRows[req.id] = req;
+    const tbody = document.getElementById('req-tbody');
+    tbody.insertAdjacentHTML('afterbegin', renderRow(req));
+    // Highlight new row briefly
+    const rr = tbody.querySelector('.rr');
+    if (rr) { rr.classList.add('new'); setTimeout(() => rr.classList.remove('new'), 2500); }
+    // Trim old rows
+    const rows = tbody.querySelectorAll('.rr');
+    if (rows.length > MAX_ROWS) {
+        let last = rows[rows.length - 1];
+        // remove tax-row and dr too
+        const id = last.dataset.id;
+        document.querySelector(`.tax-row[data-for="${id}"]`)?.remove();
+        document.getElementById('dr-'+id)?.remove();
+        last.remove();
+        delete feedRows[id];
+    }
+    applyFilter();
+}
+
+function patchAnalysis(id, data) {
+    if (feedRows[id]) Object.assign(feedRows[id], data);
+    // Update threat cell
+    const rr = document.querySelector(`.rr[data-id="${id}"]`);
+    if (rr) {
+        const thrCell = rr.cells[5];
+        if (thrCell && data.threat_level) thrCell.innerHTML = `<span class="${thrCls(data.threat_level)}">${esc(data.threat_level)}</span>`;
+    }
+    // Patch detail row AI block
+    const dr = document.getElementById('dr-'+id);
+    if (dr && data.ai_summary) {
+        const aiDiv = dr.querySelector('.ai-block, .ai-pend');
+        if (aiDiv) {
+            const iocs = (data.ai_iocs||[]).length ? `<div class="ioc-list">${data.ai_iocs.map(i=>`<span class="ioc">${esc(i)}</span>`).join('')}</div>` : '';
+            const recs = (data.ai_recommendations||[]).length ? `<ul class="rec-list">${data.ai_recommendations.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>` : '';
+            aiDiv.outerHTML = `<div class="ai-block"><div class="ai-lbl">Groq${data.ai_actor_type ? ' · '+esc(data.ai_actor_type):''} ${data.ai_confidence ? Math.round(data.ai_confidence*100)+'%':''}</div><div class="ai-sum">${esc(data.ai_summary)}</div>${data.ai_details ? `<div class="ai-det">${esc(data.ai_details)}</div>` : ''}${recs}${iocs}</div>`;
         }
+    }
+}
 
-        // ── Save note on a request ────────────────────────────────────────
-        async function saveNote(id) {
-            const input = document.getElementById(`note-${id}`);
-            if (!input) return;
-            try {
-                await fetch(`${ADMIN_PATH}/api/requests/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ notes: input.value }),
-                });
-                if (feedRows[id]) feedRows[id].notes = input.value;
-                // Brief visual confirmation
-                input.style.borderColor = 'var(--success)';
-                setTimeout(() => input.style.borderColor = '', 1200);
-            } catch(e) { console.error('Save note failed', e); }
+function patchCanary(id) {
+    const rr = document.querySelector(`.rr[data-id="${id}"]`);
+    if (rr && !rr.querySelector('.sig-canary')) {
+        rr.cells[7].insertAdjacentHTML('afterbegin', `<span class="sig-pill sig-canary">🎯</span> `);
+    }
+}
+
+// ── Toast ────────────────────────────────────────────────────────
+function toast(title, body, type='info') {
+    const w = document.getElementById('toast-wrap');
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.innerHTML = `<div class="t-title">${esc(title)}</div><div class="t-body">${esc(body)}</div>`;
+    w.appendChild(el);
+    setTimeout(() => el.style.opacity='0', 4500);
+    setTimeout(() => el.remove(), 5000);
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────
+let ws = null, wsTimer = null, pollTimer = null;
+function connectWS() {
+    const proto = location.protocol==='https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}${ADMIN_PATH}/ws/feed`);
+    ws.onopen = () => {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer=null; }
+        document.getElementById('feed-status').textContent = 'live';
+        document.getElementById('feed-status').style.color = 'var(--green)';
+        ws._pi = setInterval(() => ws.readyState===1 && ws.send('ping'), 25000);
+    };
+    ws.onmessage = e => { try { handleEvent(JSON.parse(e.data)); } catch(_){} };
+    ws.onclose = ws.onerror = () => {
+        if (ws._pi) clearInterval(ws._pi);
+        document.getElementById('feed-status').textContent = 'polling';
+        document.getElementById('feed-status').style.color = 'var(--accent)';
+        if (!pollTimer) pollTimer = setInterval(refreshStats, 5000);
+        wsTimer = setTimeout(connectWS, 3000);
+    };
+}
+function handleEvent(msg) {
+    switch(msg.type) {
+        case 'request_new':
+            prependRow(msg.data);
+            updateStat('s-total', 1, true);
+            bumpChart();
+            break;
+        case 'request_analysis':
+            patchAnalysis(msg.request_id, msg.data);
+            if (msg.data.threat_level==='critical'||msg.data.threat_level==='high') {
+                updateStat('s-critical', 1, true);
+                if (msg.data.threat_level==='critical') toast(`Critical threat #${msg.request_id}`, msg.data.ai_summary||'', 'critical');
+            }
+            break;
+        case 'canary_hit':
+            patchCanary(msg.request_id);
+            updateStat('s-canary', 1, true);
+            toast(`🎯 Canary reused #${msg.request_id}`, `${msg.data.source_ip} → ${msg.data.path}`, 'canary');
+            break;
+        case 'trap_hit':
+            toast(`⚡ Agent trap hit #${msg.request_id}`, `${msg.data.trap_type} — ${msg.data.source_ip}`, 'trap');
+            break;
+    }
+}
+
+// ── Stats polling fallback ────────────────────────────────────────
+function updateStat(id, val, delta=false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = delta ? (parseInt(el.textContent||'0')+val) : val;
+}
+async function refreshStats() {
+    try {
+        const s = await fetch(ADMIN_PATH+'/api/stats').then(r=>r.json());
+        updateStat('s-total', s.total_requests);
+        updateStat('s-ips', s.unique_ips);
+        updateStat('s-keys', s.unique_api_keys);
+        updateStat('s-stuffers', s.classification_breakdown?.credential_stuffer||0);
+        updateStat('s-mcp', s.protocol_breakdown?.mcp||0);
+        updateStat('s-agent', s.agentic_requests||0);
+        updateStat('s-critical', s.critical_threats||0);
+        // Refresh sidebar
+        if (s.actor_type_breakdown) {
+            document.getElementById('sb-actors').innerHTML = Object.entries(s.actor_type_breakdown).sort((a,b)=>b[1]-a[1])
+                .map(([k,v])=>`<div class="sb-row"><span class="sb-k">${esc(k)}</span><span class="sb-v">${v}</span></div>`).join('');
         }
+        if (s.protocol_breakdown) {
+            document.getElementById('sb-proto').innerHTML = Object.entries(s.protocol_breakdown).sort((a,b)=>b[1]-a[1])
+                .map(([k,v])=>`<div class="sb-row"><span class="sb-cls proto-tag proto-${k}">${esc(k)}</span><span class="sb-v">${v}</span></div>`).join('');
+        }
+    } catch(e) {}
+}
+async function refreshAll() {
+    await refreshStats();
+    try {
+        const reqs = await fetch(ADMIN_PATH+'/api/requests?limit=100').then(r=>r.json());
+        const tbody = document.getElementById('req-tbody');
+        tbody.innerHTML = reqs.map(r => renderRow(r)).join('');
+        reqs.forEach(r => feedRows[r.id] = r);
+        // canary count
+        const canaries = reqs.filter(r=>r.is_flagged).length;
+        updateStat('s-canary', canaries);
+        applyFilter();
+    } catch(e) {}
+}
 
-        loadMapData();
-        loadTimelineChart();
-        refreshData();    // initial full load
-        connectWS();      // start real-time feed
-    </script>
+// ── Filter ────────────────────────────────────────────────────────
+let _filterAgentic = false;
+
+function toggleAgenticFilter() {
+    _filterAgentic = !_filterAgentic;
+    const btn = document.getElementById('f-agentic-btn');
+    if (btn) btn.style.background = _filterAgentic ? 'var(--green)' : '';
+    if (btn) btn.style.color = _filterAgentic ? '#000' : '';
+    applyFilter();
+}
+
+function applyFilter() {
+    const text   = (document.getElementById('f-text')?.value||'').toLowerCase();
+    const cls    = document.getElementById('f-class')?.value||'';
+    const threat = document.getElementById('f-threat')?.value||'';
+    const proto  = document.getElementById('f-proto')?.value||'';
+
+    let vis = 0, total = 0;
+    document.querySelectorAll('#req-tbody .rr').forEach(rr => {
+        total++;
+        const txt = rr.textContent.toLowerCase();
+        const agOk = !_filterAgentic || rr.dataset.tool === '1';
+        const show = agOk && (!text||txt.includes(text)) && (!cls||txt.includes(cls)) && (!threat||txt.includes(threat)) && (!proto||txt.includes(proto));
+        rr.style.display = show ? '' : 'none';
+        const id = rr.dataset.id;
+        const tax = document.querySelector(`.tax-row[data-for="${id}"]`);
+        const dr  = document.getElementById('dr-'+id);
+        if (tax) tax.style.display = show ? '' : 'none';
+        if (dr)  dr.style.display  = (show && dr.classList.contains('open')) ? '' : (!show ? 'none' : '');
+        if (show) vis++;
+    });
+    const el = document.getElementById('f-count');
+    if (el) el.textContent = (text||cls||threat||proto||_filterAgentic) ? `${vis} / ${total}` : `${total} requests`;
+}
+
+function _resetAgenticBtn() {
+    const btn = document.getElementById('f-agentic-btn');
+    if (btn) { btn.style.background = ''; btn.style.color = ''; }
+}
+
+function clearFilter() {
+    ['f-text','f-class','f-threat','f-proto'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    _filterAgentic = false;
+    _resetAgenticBtn();
+    applyFilter();
+}
+
+// ── Stat card filter ──────────────────────────────────────────────
+function filterByCard(type, value) {
+    ['f-text','f-class','f-threat','f-proto'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    _filterAgentic = false;
+    _resetAgenticBtn();
+    if (type === 'agentic') {
+        _filterAgentic = true;
+        const btn = document.getElementById('f-agentic-btn');
+        if (btn) { btn.style.background = 'var(--green)'; btn.style.color = '#000'; }
+    } else if (type !== 'clear') {
+        const map = {text:'f-text', class:'f-class', proto:'f-proto', threat:'f-threat'};
+        if (map[type]) { const el=document.getElementById(map[type]); if(el) el.value=value; }
+    }
+    applyFilter();
+    document.getElementById('req-tbl')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// ── Delete ────────────────────────────────────────────────────────
+let _delTarget = null;
+function confirmDelete(id, rowEl) {
+    _delTarget = {id, rowEl};
+    document.getElementById('del-modal').classList.add('open');
+}
+async function execDelete() {
+    document.getElementById('del-modal').classList.remove('open');
+    if (!_delTarget) return;
+    const {id, rowEl} = _delTarget; _delTarget = null;
+    try {
+        const ok = await fetch(`${ADMIN_PATH}/api/requests/${id}`, {method:'DELETE'}).then(r=>r.ok);
+        if (ok) {
+            rowEl.classList.add('deleting');
+            setTimeout(() => {
+                const id2 = rowEl.dataset?.id || id;
+                document.querySelector(`.tax-row[data-for="${id2}"]`)?.remove();
+                document.getElementById('dr-'+id2)?.remove();
+                rowEl.remove();
+                delete feedRows[id2];
+                applyFilter();
+            }, 280);
+        }
+    } catch(e) {}
+}
+document.getElementById('del-modal').addEventListener('click', e => { if(e.target===e.currentTarget) e.currentTarget.classList.remove('open'); });
+
+// ── Flag / Note ───────────────────────────────────────────────────
+async function toggleFlag(id, btn) {
+    const on = btn.classList.contains('flagged');
+    const ok = await fetch(`${ADMIN_PATH}/api/requests/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({is_flagged:!on})}).then(r=>r.ok).catch(()=>false);
+    if (ok) { btn.classList.toggle('flagged'); btn.textContent = on ? '⚐ Flag' : '⚑ Flagged'; if(feedRows[id]) feedRows[id].is_flagged=!on; }
+}
+async function saveNote(id) {
+    const inp = document.getElementById('note-'+id);
+    if (!inp) return;
+    const ok = await fetch(`${ADMIN_PATH}/api/requests/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:inp.value})}).then(r=>r.ok).catch(()=>false);
+    if (ok) { inp.style.borderColor='var(--green)'; setTimeout(()=>inp.style.borderColor='',1200); if(feedRows[id]) feedRows[id].notes=inp.value; }
+}
+
+async function reclassify(id, field, value, sel) {
+    if (!value) return;
+    const ok = await fetch(`${ADMIN_PATH}/api/requests/${id}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({[field]: value})
+    }).then(r=>r.ok).catch(()=>false);
+    if (ok) {
+        sel.style.borderColor = 'var(--green)';
+        setTimeout(()=>sel.style.borderColor='', 1200);
+        // Update feed cache
+        if (feedRows[id]) feedRows[id][field] = value;
+        // Update row cell visually
+        const rr = document.querySelector(`tr.rr[data-id="${id}"]`);
+        if (rr) {
+            const cells = rr.querySelectorAll('td');
+            if (field === 'classification' && cells[4])
+                cells[4].innerHTML = `<span class="${clsCls(value)}">${esc(value)}</span>`;
+            if (field === 'threat_level' && cells[5])
+                cells[5].innerHTML = `<span class="${thrCls(value)}">${esc(value)}</span>`;
+        }
+    } else {
+        sel.style.borderColor = 'var(--red)';
+        setTimeout(()=>sel.style.borderColor='', 1200);
+    }
+}
+
+async function analyzeNow(id, btn) {
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Analyzing…';
+    btn.style.color = '';
+    btn.title = '';
+    try {
+        const res = await fetch(`${ADMIN_PATH}/api/analyze/${id}`, {method:'POST'});
+        if (!res.ok) {
+            const err = await res.json().catch(()=>({detail:'unknown error'}));
+            const msg = err.detail || 'failed';
+            btn.textContent = '⚡ Retry';
+            btn.disabled = false;
+            btn.style.color = 'var(--red)';
+            btn.title = msg;  // hover to see the reason
+            // Show error inline near button
+            let errEl = btn.nextSibling;
+            if (!errEl || !errEl.classList?.contains('analyze-err')) {
+                errEl = document.createElement('span');
+                errEl.className = 'analyze-err';
+                btn.after(errEl);
+            }
+            errEl.textContent = '✗ ' + msg;
+            return;
+        }
+        const data = await res.json();
+        // Clear any error message
+        const errEl = btn.nextSibling;
+        if (errEl?.classList?.contains('analyze-err')) errEl.remove();
+
+        // Replace pending block with result
+        const pend = document.getElementById('aipend-'+id);
+        if (pend) {
+            const summ = data.ai_summary || '(no summary)';
+            const actor = data.ai_actor_type ? ` · ${data.ai_actor_type}` : '';
+            pend.outerHTML = `<div class="ai-block" id="aiblock-${id}"><div class="ai-lbl">Groq${actor}</div><div class="ai-sum">${esc(summ)}</div></div>`;
+        } else {
+            // Re-analysis — update existing block
+            const block = document.getElementById('aiblock-'+id);
+            if (block) {
+                block.querySelector('.ai-sum').textContent = data.ai_summary || '';
+                const lbl = block.querySelector('.ai-lbl');
+                if (lbl && data.ai_actor_type) lbl.textContent = 'Groq · ' + data.ai_actor_type;
+            }
+            // Restore Re-analyze button
+            btn.textContent = '⚡ Re-analyze';
+            btn.disabled = false;
+            btn.style.color = '';
+        }
+        // Update threat level cell in the summary row
+        if (data.threat_level) {
+            const rr = document.querySelector(`tr.rr[data-id="${id}"]`);
+            if (rr) {
+                const cells = rr.querySelectorAll('td');
+                if (cells[5]) cells[5].innerHTML = `<span class="${thrCls(data.threat_level)}">${esc(data.threat_level)}</span>`;
+            }
+            // Also update threat dropdown if present
+            const thrSel = document.getElementById('thr-'+id);
+            if (thrSel) thrSel.value = data.threat_level;
+        }
+    } catch(e) {
+        btn.textContent = '⚡ Retry';
+        btn.disabled = false;
+        btn.style.color = 'var(--red)';
+        btn.title = String(e);
+    }
+}
+
+// ── Lure Intel ─────────────────────────────────────────────────────
+async function loadLureStats() {
+    try {
+        const d = await fetch(ADMIN_PATH + '/api/lure-stats').then(r=>r.json());
+        const el = document.getElementById('lure-panel');
+        if (!el) return;
+
+        const topPaths = (d.top_lure_paths||[]).slice(0,8).map(p=>
+            `<div class="lure-row"><span class="lure-path">${esc(p.path)}</span><span class="lure-hits">${p.hits}</span></div>`
+        ).join('');
+
+        const recentHits = (d.recent_hits||[]).slice(0,6).map(h=>
+            `<div class="lure-row" style="font-size:10px"><span class="lure-path">${flag(h.country)} ${esc(h.ip||'—')} → ${esc(h.path)}</span><span class="lure-hits" style="color:var(--dim)">${(h.timestamp||'').slice(11,16)}</span></div>`
+        ).join('');
+
+        el.innerHTML = `
+        <div class="lure-stats-row">
+            <div class="lure-stat"><div class="ls-val">${d.total_lure_hits_30d||0}</div><div class="ls-lbl">Lure Hits (30d)</div></div>
+            <div class="lure-stat"><div class="ls-val red">${d.canary_reuse_hits||0}</div><div class="ls-lbl">Canary Reuse</div></div>
+            <div class="lure-stat"><div class="ls-val">${d.finetune_job_captures||0}</div><div class="ls-lbl">FT Captures</div></div>
+            <div class="lure-stat"><div class="ls-val">${d.file_upload_captures||0}</div><div class="ls-lbl">File Uploads</div></div>
+        </div>
+        <div class="db-title" style="margin:10px 0 6px">TOP LURE PATHS</div>
+        ${topPaths || '<div style="color:var(--dim);font-size:11px">No lure hits yet</div>'}
+        ${recentHits ? '<div class="db-title" style="margin:10px 0 6px">RECENT HITS</div>' + recentHits : ''}`;
+    } catch(e) {}
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
+initMap();
+loadChart();
+loadCountryChart();
+loadLureStats();
+refreshAll();
+connectWS();
+</script>
 </body>
 </html>

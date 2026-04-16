@@ -1,200 +1,221 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="soc">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings</title>
+    <title>Settings — Honeypot</title>
+    <!-- Inherit theme from dashboard without flash -->
+    <script>(function(){var t=localStorage.getItem('hp-theme')||'soc';document.documentElement.setAttribute('data-theme',t);})();</script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
+        /* ── Shared theme variables (same as dashboard) ── */
         :root {
-            --bg-primary: #0f0f1a;
-            --bg-secondary: #1a1a2e;
-            --bg-tertiary: #252542;
-            --accent: #e94560;
-            --accent-hover: #ff6b8a;
-            --text-primary: #e4e4e4;
-            --text-secondary: #888;
-            --border: rgba(100, 100, 150, 0.2);
-            --success: #4ade80;
-            --warning: #fbbf24;
-            --danger: #f87171;
+            --bg:     #0d0d0d; --surf:  #141414; --surf2: #1a1a1a;
+            --line:   #1c1c1c; --border:#262626;
+            --text:   #d4d4d4; --dim:   #4a4a4a;
+            --accent: #d97706; --red:   #dc2626;
+            --green:  #16a34a; --blue:  #3b82f6;
+            --yellow: #ca8a04;
+            --mono: 'Fira Code','JetBrains Mono','Cascadia Code','Consolas',monospace;
+            --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+        }
+        [data-theme="swiss"] {
+            --bg:#070707; --surf:#0e0e0e; --surf2:#131313;
+            --line:#161616; --border:#202020;
+            --text:#f0f0f0; --dim:#3a3a3a;
+            --accent:#e63c2f; --red:#e63c2f; --green:#22c55e; --blue:#60a5fa;
+        }
+        [data-theme="paper"] {
+            --bg:#f0ede6; --surf:#f7f5f0; --surf2:#ffffff;
+            --line:#e8e2d8; --border:#d5cec4;
+            --text:#1a1916; --dim:#8a8278;
+            --accent:#b91c1c; --red:#b91c1c; --green:#166534; --blue:#1d4ed8;
         }
 
+        *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: var(--sans);
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
+            font-size: 13px;
         }
 
-        .header {
-            background: var(--bg-secondary);
+        /* ── Header ── */
+        .hdr {
+            position: sticky; top: 0; z-index: 100;
+            display: flex; align-items: center; gap: 14px;
+            padding: 0 20px; height: 40px;
+            background: var(--surf);
             border-bottom: 1px solid var(--border);
-            padding: 15px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
         }
+        .brand { font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+        .hdr-sep { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
+        .hdr-title { font-size: 12px; color: var(--dim); font-family: var(--mono); }
+        .hdr-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
-        .header h1 {
-            font-size: 20px;
-            color: var(--accent);
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        .hdr-btn {
+            padding: 3px 10px; font-size: 11px; background: transparent;
+            border: 1px solid var(--border); border-radius: 2px;
+            color: var(--dim); cursor: pointer; transition: all .15s;
+            font-family: var(--mono); font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+            text-decoration: none; display: inline-flex; align-items: center; gap: 5px;
         }
+        .hdr-btn:hover { border-color: var(--text); color: var(--text); }
+        .hdr-btn.primary { border-color: var(--accent); color: var(--accent); }
+        .hdr-btn.primary:hover { background: var(--accent); color: var(--bg); }
 
-        .header-actions { display: flex; gap: 15px; }
-
-        .btn {
-            padding: 10px 20px;
-            border-radius: 6px;
-            border: none;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
+        .theme-sw { display: flex; }
+        .theme-sw button {
+            padding: 3px 8px; font-size: 10px; font-family: var(--mono); font-weight: 700;
+            letter-spacing: .08em; text-transform: uppercase; background: transparent;
+            border: 1px solid var(--border); color: var(--dim); cursor: pointer;
+            transition: all .15s; margin-left: -1px;
         }
+        .theme-sw button:first-child { border-radius: 2px 0 0 2px; }
+        .theme-sw button:last-child  { border-radius: 0 2px 2px 0; }
+        .theme-sw button:hover { border-color: var(--dim); color: var(--text); z-index: 1; }
+        .theme-sw button.on { border-color: var(--accent); color: var(--accent); z-index: 2; }
 
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); }
-        .btn-secondary:hover { background: rgba(100, 100, 150, 0.2); }
-        .btn-success { background: var(--success); color: #000; }
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
-
-        .container { max-width: 900px; margin: 0 auto; padding: 30px; }
+        /* ── Content ── */
+        .container { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
 
         .section {
-            background: var(--bg-secondary);
+            background: var(--surf);
             border: 1px solid var(--border);
-            border-radius: 12px;
-            margin-bottom: 24px;
+            border-radius: 4px;
+            margin-bottom: 18px;
             overflow: hidden;
         }
 
         .section-header {
-            padding: 16px 20px;
+            padding: 11px 16px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
             gap: 10px;
+            background: var(--surf);
         }
 
-        .section-header h2 { font-size: 16px; font-weight: 600; }
-        .section-header .icon { font-size: 20px; }
-        .section-body { padding: 20px; }
-        .form-group { margin-bottom: 20px; }
+        .section-header h2 { font-size: 12px; font-weight: 700; font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--text); }
+        .section-header .icon { font-size: 15px; }
+        .section-body { padding: 18px 16px; }
+        .form-group { margin-bottom: 18px; }
         .form-group:last-child { margin-bottom: 0; }
-        .form-group label { display: block; margin-bottom: 8px; font-size: 14px; color: var(--text-secondary); }
-        .form-group label strong { color: var(--text-primary); }
+
+        .form-group label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--dim); }
+        .form-group label strong { color: var(--text); font-family: var(--mono); }
 
         .form-control {
             width: 100%;
-            padding: 12px 16px;
-            background: var(--bg-tertiary);
+            padding: 8px 12px;
+            background: var(--bg);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            color: var(--text-primary);
-            font-size: 14px;
-            transition: border-color 0.2s;
+            border-radius: 2px;
+            color: var(--text);
+            font-size: 12px;
+            font-family: var(--sans);
+            transition: border-color 0.15s;
+            outline: none;
         }
+        .form-control:focus { border-color: var(--accent); }
+        .form-control::placeholder { color: var(--dim); }
+        .form-control.mono { font-family: var(--mono); font-size: 11px; }
+        select.form-control { cursor: pointer; }
 
-        .form-control:focus { outline: none; border-color: var(--accent); }
-        .form-control::placeholder { color: #555; }
-        .form-control.mono { font-family: 'Monaco', 'Menlo', monospace; }
-        .form-hint { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+        .form-hint { font-size: 11px; color: var(--dim); margin-top: 5px; line-height: 1.5; }
         .form-hint a { color: var(--accent); text-decoration: none; }
         .form-hint a:hover { text-decoration: underline; }
 
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+        .form-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
         @media (max-width: 600px) { .form-row, .form-row-3 { grid-template-columns: 1fr; } }
 
         .switch-group {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 0; border-bottom: 1px solid var(--line);
         }
         .switch-group:last-child { border-bottom: none; }
-        .switch-label { display: flex; flex-direction: column; gap: 4px; }
-        .switch-label strong { font-size: 14px; }
-        .switch-label span { font-size: 12px; color: var(--text-secondary); }
+        .switch-label { display: flex; flex-direction: column; gap: 3px; }
+        .switch-label strong { font-size: 12px; font-family: var(--mono); color: var(--text); }
+        .switch-label span { font-size: 11px; color: var(--dim); }
 
-        .switch { position: relative; width: 50px; height: 28px; }
+        .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider {
-            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: var(--bg-tertiary); border: 1px solid var(--border);
-            transition: 0.3s; border-radius: 28px;
+            position: absolute; cursor: pointer; inset: 0;
+            background: var(--surf2); border: 1px solid var(--border);
+            transition: 0.25s; border-radius: 24px;
         }
         .slider:before {
-            position: absolute; content: ""; height: 20px; width: 20px;
-            left: 4px; bottom: 3px; background-color: var(--text-secondary);
-            transition: 0.3s; border-radius: 50%;
+            position: absolute; content: ""; height: 16px; width: 16px;
+            left: 3px; bottom: 3px;
+            background: var(--dim); transition: 0.25s; border-radius: 50%;
         }
-        input:checked + .slider { background-color: var(--accent); border-color: var(--accent); }
-        input:checked + .slider:before { transform: translateX(20px); background-color: white; }
+        input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(20px); background: #fff; }
 
         .status-indicator {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 9px; border-radius: 2px; font-size: 11px; font-weight: 700;
+            font-family: var(--mono);
         }
-        .status-indicator.success { background: rgba(74, 222, 128, 0.2); color: var(--success); }
-        .status-indicator.warning { background: rgba(251, 191, 36, 0.2); color: var(--warning); }
-        .status-indicator.error { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+        .status-indicator.success { background: rgba(22,163,74,.15); color: var(--green); }
+        .status-indicator.warning { background: rgba(202,138,4,.15); color: var(--yellow); }
+        .status-indicator.error   { background: rgba(220,38,38,.15); color: var(--red); }
+        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
-        .toast {
-            position: fixed; bottom: 30px; right: 30px; padding: 16px 24px;
-            background: var(--success); color: white; border-radius: 8px;
-            font-weight: 600; opacity: 0; transform: translateY(20px);
-            transition: all 0.3s; z-index: 1000;
-        }
-        .toast.show { opacity: 1; transform: translateY(0); }
-        .toast.error { background: var(--danger); }
-
-        .input-group { display: flex; gap: 10px; }
+        .input-group { display: flex; gap: 8px; }
         .input-group .form-control { flex: 1; }
 
-        .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
         .tag {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 6px 12px; background: var(--bg-tertiary);
-            border: 1px solid var(--border); border-radius: 6px;
-            font-size: 13px; font-family: monospace;
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; background: var(--surf2);
+            border: 1px solid var(--border); border-radius: 2px;
+            font-size: 11px; font-family: var(--mono); color: var(--text);
         }
-        .tag .remove { cursor: pointer; color: var(--danger); font-weight: bold; }
-
-        .collapsible { cursor: pointer; }
-        .collapsible-content { display: none; padding-top: 15px; }
-        .collapsible-content.show { display: block; }
+        .tag .remove { cursor: pointer; color: var(--red); font-weight: bold; font-size: 13px; line-height: 1; }
 
         .test-result {
-            margin-top: 10px; padding: 10px; border-radius: 6px;
-            font-size: 13px; display: none;
+            margin-top: 8px; padding: 8px 12px; border-radius: 2px;
+            font-size: 11px; font-family: var(--mono); display: none;
         }
-        .test-result.success { display: block; background: rgba(74, 222, 128, 0.1); color: var(--success); }
-        .test-result.error { display: block; background: rgba(248, 113, 113, 0.1); color: var(--danger); }
+        .test-result.success { display: block; background: rgba(22,163,74,.1); color: var(--green); }
+        .test-result.error   { display: block; background: rgba(220,38,38,.1); color: var(--red); }
 
-        .divider { height: 1px; background: var(--border); margin: 20px 0; }
+        .divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+            padding: 9px 16px; background: var(--surf);
+            border: 1px solid var(--accent); border-radius: 2px;
+            font-family: var(--mono); font-size: 11px; color: var(--accent);
+            opacity: 0; transform: translateY(6px);
+            transition: all 0.2s; pointer-events: none;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast.error { border-color: var(--red); color: var(--red); }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); }
     </style>
 </head>
 <body>
-    <header class="header">
-        <h1>Settings</h1>
-        <div class="header-actions">
-            <a href="{{ admin_path }}" class="btn btn-secondary">← Dashboard</a>
-            <button class="btn btn-primary" onclick="saveAll()">💾 Save All</button>
+    <header class="hdr">
+        <span class="brand">HONEYPOT //</span>
+        <div class="hdr-sep"></div>
+        <span class="hdr-title">Settings</span>
+        <div class="hdr-right">
+            <div class="theme-sw" id="theme-sw">
+                <button onclick="setTheme('soc')"   data-t="soc">SOC</button>
+                <button onclick="setTheme('swiss')" data-t="swiss">SWISS</button>
+                <button onclick="setTheme('paper')" data-t="paper">PAPER</button>
+            </div>
+            <div class="hdr-sep"></div>
+            <a href="{{ admin_path }}" class="hdr-btn">← Dashboard</a>
+            <button class="hdr-btn primary" onclick="saveAll()">Save All</button>
         </div>
     </header>
 
@@ -247,6 +268,65 @@
                             <span class="slider"></span>
                         </label>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Local LLM / Ollama -->
+        <div class="section">
+            <div class="section-header">
+                <span class="icon">🤖</span>
+                <h2>Local LLM (Ollama)</h2>
+            </div>
+            <div class="section-body">
+                <p class="form-hint" style="margin-bottom:16px">Run Qwen2.5, Phi3, Mistral and other models locally. No API key needed. Recommended for high-volume SSH shell emulation.<br>Install: <code>ollama pull qwen2.5:1.5b</code></p>
+                <div class="form-row">
+                    <div class="form-group" style="flex:2">
+                        <label><strong>Ollama URL</strong></label>
+                        <input type="text" class="form-control mono" id="ollama_base_url"
+                               placeholder="http://localhost:11434"
+                               value="{{ config.ollama_base_url or 'http://localhost:11434' }}">
+                        <p class="form-hint">Host where <code>ollama serve</code> is running</p>
+                    </div>
+                    <div class="form-group" style="flex:2">
+                        <label><strong>Model</strong></label>
+                        <input type="text" class="form-control mono" id="ollama_model"
+                               placeholder="qwen2.5:1.5b"
+                               value="{{ config.ollama_model or 'qwen2.5:1.5b' }}">
+                        <p class="form-hint">Best for SSH: <code>qwen2.5:1.5b</code> · HTTP: <code>phi3:3.8b</code></p>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label><strong>Enable Ollama</strong></label>
+                        <label class="switch" style="margin-top:8px">
+                            <input type="checkbox" id="ollama_enabled" {{ 'checked' if config.ollama_enabled }}>
+                            <span class="slider"></span>
+                        </label>
+                        <p class="form-hint">When enabled, Ollama is used for SSH shell emulation and dynamic HTTP responses</p>
+                    </div>
+                    <div class="form-group">
+                        <label><strong>Galah Dynamic HTTP</strong></label>
+                        <label class="switch" style="margin-top:8px">
+                            <input type="checkbox" id="galah_dynamic_responses" {{ 'checked' if config.galah_dynamic_responses != false }}>
+                            <span class="slider"></span>
+                        </label>
+                        <p class="form-hint">LLM generates realistic responses to unknown paths (Galah-style)</p>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label><strong>Custom LLM API (vLLM, LM Studio, Together.ai)</strong></label>
+                    <div class="form-row">
+                        <input type="text" class="form-control mono" id="custom_llm_base_url"
+                               placeholder="http://localhost:8000" style="flex:2"
+                               value="{{ config.custom_llm_base_url or '' }}">
+                        <input type="text" class="form-control mono" id="custom_llm_model"
+                               placeholder="model-name" style="flex:1"
+                               value="{{ config.custom_llm_model or '' }}">
+                        <input type="password" class="form-control mono" id="custom_llm_api_key"
+                               placeholder="api-key (optional)" style="flex:1" value="">
+                    </div>
+                    <p class="form-hint">OpenAI-compatible endpoint. Leave blank to use Groq.</p>
                 </div>
             </div>
         </div>
@@ -569,10 +649,23 @@
         </div>
     </div>
 
-    <div class="toast" id="toast">Settings saved!</div>
+    <div class="toast" id="toast">Settings saved</div>
 
     <script>
         const ADMIN_PATH = '{{ admin_path }}';
+
+        // ── Theme switcher (same logic as dashboard) ──────────────────
+        function setTheme(name) {
+            document.documentElement.setAttribute('data-theme', name);
+            localStorage.setItem('hp-theme', name);
+            document.querySelectorAll('#theme-sw button').forEach(b => {
+                b.classList.toggle('on', b.dataset.t === name);
+            });
+        }
+        (function() {
+            var t = localStorage.getItem('hp-theme') || 'soc';
+            document.querySelectorAll('#theme-sw button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+        })();
         let additionalPorts = {{ config.additional_ports | tojson }};
         let canaryTokens = {{ config.canary_tokens | tojson }};
 
@@ -733,6 +826,13 @@
                 groq_model: document.getElementById('groq_model').value,
                 groq_chat_model: document.getElementById('groq_chat_model').value,
                 groq_enabled: document.getElementById('groq_enabled').checked,
+                ollama_enabled: document.getElementById('ollama_enabled').checked,
+                ollama_base_url: document.getElementById('ollama_base_url').value,
+                ollama_model: document.getElementById('ollama_model').value,
+                custom_llm_base_url: document.getElementById('custom_llm_base_url').value,
+                custom_llm_model: document.getElementById('custom_llm_model').value,
+                custom_llm_api_key: readSecretValue('custom_llm_api_key'),
+                galah_dynamic_responses: document.getElementById('galah_dynamic_responses').checked,
                 slack_webhook_url: readSecretValue('slack_webhook_url'),
                 discord_webhook_url: readSecretValue('discord_webhook_url'),
                 webhook_url: readSecretValue('webhook_url'),

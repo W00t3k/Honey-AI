@@ -523,8 +523,8 @@ class Database:
             return True
 
     async def update_request_meta(self, request_id: int, data: dict) -> bool:
-        """Update is_flagged and/or notes on a request. Returns True if found."""
-        allowed = {"is_flagged", "notes"}
+        """Update is_flagged, notes, classification, and/or threat_level on a request."""
+        allowed = {"is_flagged", "notes", "classification", "threat_level"}
         async with self.async_session() as session:
             result = await session.execute(select(Request).where(Request.id == request_id))
             req = result.scalar_one_or_none()

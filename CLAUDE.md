@@ -6,9 +6,8 @@ attackers testing stolen keys, injecting prompts, and probing agentic/MCP infras
 
 ## Stack
 - Python 3.12, FastAPI, SQLite (aiosqlite), Jinja2 admin UI
-- Runs from `honeypot/` directory with `python main.py`
+- Run from repo root: `python main.py`
 - Always activate venv first: `source venv/bin/activate`
-- Working directory for running: `honeypot/`
 
 ## Key files
 - `main.py` — app entry, registers all routers

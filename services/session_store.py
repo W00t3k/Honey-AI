@@ -10,10 +10,28 @@ from threading import Lock
 from typing import Optional
 
 
+class ShellState:
+    """Persistent state for an SSH session — working directory, files, env vars."""
+
+    def __init__(self):
+        self.cwd: str = "/home/appsvc"
+        self.env: dict[str, str] = {
+            "USER": "appsvc",
+            "HOME": "/home/appsvc",
+            "SHELL": "/bin/bash",
+            "PATH": "/home/appsvc/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "PWD": "/home/appsvc",
+        }
+        # Track files/dirs created in this session (set of absolute paths)
+        self.created: set[str] = set()
+        # Track any canary key the session has been exposed to
+        self.exposed_canary: Optional[str] = None
+
+
 class SessionStore:
     """Bounded in-memory conversation store keyed by source and protocol."""
 
-    def __init__(self, max_messages: int = 20, max_shell_turns: int = 20) -> None:
+    def __init__(self, max_messages: int = 20, max_shell_turns: int = 30) -> None:
         self.max_messages = max_messages
         self.max_shell_turns = max_shell_turns
         self._lock = Lock()
@@ -23,6 +41,8 @@ class SessionStore:
         self._shell_sessions: dict[str, deque[dict]] = defaultdict(
             lambda: deque(maxlen=self.max_shell_turns)
         )
+        # Persistent shell state per IP
+        self._shell_state: dict[str, ShellState] = {}
 
     def _chat_key(self, source: str, protocol: str) -> str:
         return f"{protocol}:{source or 'unknown'}"
@@ -77,6 +97,35 @@ class SessionStore:
             self._shell_sessions[self._shell_key(source)].append(
                 {"command": command.strip(), "output": output.strip()}
             )
+
+    # ── Shell state (HoneyGPT-style persistent session) ───────────────────────
+
+    def get_shell_state(self, source: str) -> "ShellState":
+        """Return (or create) the persistent shell state for this IP."""
+        with self._lock:
+            key = self._shell_key(source)
+            if key not in self._shell_state:
+                self._shell_state[key] = ShellState()
+            return self._shell_state[key]
+
+    def update_shell_cwd(self, source: str, new_cwd: str) -> None:
+        """Update the working directory for a session."""
+        with self._lock:
+            state = self._shell_state.setdefault(self._shell_key(source), ShellState())
+            state.cwd = new_cwd
+            state.env["PWD"] = new_cwd
+
+    def add_shell_created(self, source: str, path: str) -> None:
+        """Track a file/directory created during the session."""
+        with self._lock:
+            state = self._shell_state.setdefault(self._shell_key(source), ShellState())
+            state.created.add(path)
+
+    def set_shell_env(self, source: str, key: str, value: str) -> None:
+        """Set an environment variable for the session."""
+        with self._lock:
+            state = self._shell_state.setdefault(self._shell_key(source), ShellState())
+            state.env[key] = value
 
     def _coerce_content(self, content: object) -> str:
         """Flatten provider-specific content blocks into text."""

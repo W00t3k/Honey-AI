@@ -195,18 +195,35 @@ async def create_assistant(request: Request):
     return Response(content=response_body, media_type="application/json", headers=get_api_headers())
 
 
+# ── In-memory stores for uploaded files and fine-tuning jobs ────────────────────
+# Key: file_id → {metadata, content}
+_uploaded_files: dict[str, dict] = {}
+# Key: job_id → {metadata, training_lines, created_at}
+_finetune_jobs: dict[str, dict] = {}
+
+
 @router.get("/v1/files")
 async def list_files(request: Request):
-    """
-    List uploaded files.
-
-    HIGH VALUE LURE: Attackers look for training data and sensitive documents.
-    """
+    """List uploaded files — includes files uploaded by attackers."""
     start_time = time.time()
     await add_realistic_delay()
     responder = get_responder()
-    response_data = responder.files_list()
-    response_body = json.dumps(response_data)
+    base_data = responder.files_list()
+    # Merge in any real uploads the attacker sent us
+    attacker_files = [
+        {
+            "id": fid,
+            "object": "file",
+            "bytes": meta.get("bytes", 0),
+            "created_at": meta.get("created_at", int(time.time())),
+            "filename": meta.get("filename", "upload.jsonl"),
+            "purpose": meta.get("purpose", "fine-tune"),
+            "status": "processed",
+        }
+        for fid, meta in _uploaded_files.items()
+    ]
+    base_data["data"] = attacker_files + base_data.get("data", [])
+    response_body = json.dumps(base_data)
     response_time_ms = (time.time() - start_time) * 1000
     logger = get_logger()
     await logger.log_request(
@@ -214,27 +231,279 @@ async def list_files(request: Request):
         response_body=response_body, response_status=200, response_time_ms=response_time_ms,
     )
     return Response(content=response_body, media_type="application/json", headers=get_api_headers())
+
+
+@router.post("/v1/files")
+async def upload_file(request: Request):
+    """
+    File upload capture — accepts fine-tuning JSONL, context files, etc.
+    Logs the full content of whatever the attacker uploads, then returns
+    a convincing file object with a canary ID they'll use in follow-up calls.
+    """
+    start_time = time.time()
+    content_type = request.headers.get("content-type", "")
+    file_content = ""
+    filename = "upload.jsonl"
+    purpose = "fine-tune"
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        purpose = str(form.get("purpose", "fine-tune"))
+        upload = form.get("file")
+        if upload and hasattr(upload, "read"):
+            raw = await upload.read()
+            file_content = raw.decode("utf-8", errors="replace")
+            filename = getattr(upload, "filename", "upload.jsonl") or "upload.jsonl"
+    else:
+        body_bytes = await request.body()
+        file_content = body_bytes.decode("utf-8", errors="replace")
+
+    file_id = f"file-{uuid.uuid4().hex[:24]}"
+    byte_count = len(file_content.encode())
+
+    _uploaded_files[file_id] = {
+        "filename": filename,
+        "purpose": purpose,
+        "bytes": byte_count,
+        "content": file_content,          # ← full capture
+        "created_at": int(time.time()),
+    }
+
+    response_data = {
+        "id": file_id,
+        "object": "file",
+        "bytes": byte_count,
+        "created_at": int(time.time()),
+        "filename": filename,
+        "purpose": purpose,
+        "status": "processed",
+        "status_details": None,
+    }
+    response_body = json.dumps(response_data)
+    response_time_ms = (time.time() - start_time) * 1000
+    logger = get_logger()
+    await logger.log_request(
+        request=request, body_raw=file_content[:2000], body_parsed={"purpose": purpose, "filename": filename, "bytes": byte_count},
+        response_body=response_body, response_status=201, response_time_ms=response_time_ms,
+    )
+    return Response(content=response_body, status_code=201, media_type="application/json", headers=get_api_headers())
+
+
+@router.get("/v1/files/{file_id}")
+async def get_file(file_id: str, request: Request):
+    """Return file metadata — if it's one we captured, confirm it."""
+    start_time = time.time()
+    await add_realistic_delay()
+    if file_id in _uploaded_files:
+        meta = _uploaded_files[file_id]
+        response_data = {
+            "id": file_id,
+            "object": "file",
+            "bytes": meta.get("bytes", 0),
+            "created_at": meta.get("created_at", int(time.time())),
+            "filename": meta.get("filename", "upload.jsonl"),
+            "purpose": meta.get("purpose", "fine-tune"),
+            "status": "processed",
+        }
+    else:
+        responder = get_responder()
+        response_data = {
+            "id": file_id,
+            "object": "file",
+            "bytes": random.randint(10000, 500000),
+            "created_at": int(time.time()) - random.randint(3600, 86400),
+            "filename": f"training_data_{file_id[-6:]}.jsonl",
+            "purpose": "fine-tune",
+            "status": "processed",
+        }
+    response_body = json.dumps(response_data)
+    response_time_ms = (time.time() - start_time) * 1000
+    await get_logger().log_request(
+        request=request, body_raw=None, body_parsed=None,
+        response_body=response_body, response_status=200, response_time_ms=response_time_ms,
+    )
+    return Response(content=response_body, media_type="application/json", headers=get_api_headers())
+
+
+@router.get("/v1/files/{file_id}/content")
+async def get_file_content(file_id: str, request: Request):
+    """
+    File content retrieval — if the attacker uploaded a file we serve it back
+    (with a canary token injected into text content).  This confirms they're
+    using the file API for a training or RAG pipeline.
+    """
+    start_time = time.time()
+    responder = get_responder()
+
+    if file_id in _uploaded_files:
+        raw_content = _uploaded_files[file_id].get("content", "")
+        canary = responder.get_canary_token(0)
+        # Inject canary into first line so we can track if the model is trained on it
+        injected = f"# canary:{canary}\n" + raw_content
+        content_to_serve = injected
+    else:
+        # Serve convincing fake training data with canary
+        canary = responder.get_canary_token(1)
+        lines = [
+            json.dumps({"messages": [
+                {"role": "system", "content": f"Internal key: {canary}"},
+                {"role": "user", "content": "What models are available?"},
+                {"role": "assistant", "content": "gpt-4o, gpt-4-turbo, gpt-4o-mini, claude-3-5-sonnet"},
+            ]}),
+            json.dumps({"messages": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi! How can I help?"},
+            ]}),
+        ]
+        content_to_serve = "\n".join(lines)
+
+    response_time_ms = (time.time() - start_time) * 1000
+    await get_logger().log_request(
+        request=request, body_raw=None, body_parsed={"file_id": file_id},
+        response_body=content_to_serve[:300], response_status=200, response_time_ms=response_time_ms,
+    )
+    return Response(content=content_to_serve, media_type="application/jsonl", headers=get_api_headers())
+
+
+@router.delete("/v1/files/{file_id}")
+async def delete_file(file_id: str, request: Request):
+    """Fake file delete — log that they tried, confirm deletion."""
+    _uploaded_files.pop(file_id, None)
+    data = {"id": file_id, "object": "file", "deleted": True}
+    await get_logger().log_request(
+        request=request, body_raw=None, body_parsed=None,
+        response_body=json.dumps(data), response_status=200, response_time_ms=0,
+    )
+    return Response(content=json.dumps(data), media_type="application/json", headers=get_api_headers())
 
 
 @router.get("/v1/fine-tuning/jobs")
 async def list_fine_tuning_jobs(request: Request):
-    """
-    List fine-tuning jobs.
-
-    RECON LURE: Reveals model names and training file IDs to enumerate.
-    """
+    """List fine-tuning jobs — includes any jobs the attacker created."""
     start_time = time.time()
     await add_realistic_delay()
     responder = get_responder()
-    response_data = responder.fine_tuning_jobs()
-    response_body = json.dumps(response_data)
+    base_data = responder.fine_tuning_jobs()
+    attacker_jobs = [_job_status(jid, meta) for jid, meta in _finetune_jobs.items()]
+    base_data["data"] = attacker_jobs + base_data.get("data", [])
+    response_body = json.dumps(base_data)
     response_time_ms = (time.time() - start_time) * 1000
-    logger = get_logger()
-    await logger.log_request(
+    await get_logger().log_request(
         request=request, body_raw=None, body_parsed=None,
         response_body=response_body, response_status=200, response_time_ms=response_time_ms,
     )
     return Response(content=response_body, media_type="application/json", headers=get_api_headers())
+
+
+def _job_status(job_id: str, meta: dict) -> dict:
+    """Return a status dict that progresses realistically over time."""
+    elapsed = time.time() - meta.get("created_at", time.time())
+    if elapsed < 30:
+        status = "validating_files"
+        trained_tokens = None
+    elif elapsed < 120:
+        status = "queued"
+        trained_tokens = None
+    elif elapsed < 600:
+        status = "running"
+        trained_tokens = int(elapsed * 50)
+    else:
+        status = "succeeded"
+        trained_tokens = meta.get("estimated_tokens", random.randint(50000, 500000))
+    return {
+        "id": job_id,
+        "object": "fine_tuning.job",
+        "created_at": int(meta.get("created_at", time.time())),
+        "finished_at": int(meta.get("created_at", time.time()) + 600) if status == "succeeded" else None,
+        "model": meta.get("model", "gpt-4o-mini"),
+        "fine_tuned_model": f"{meta.get('model', 'gpt-4o-mini')}:ft-example-corp:{job_id[-8:]}" if status == "succeeded" else None,
+        "organization_id": "org-honeypot",
+        "status": status,
+        "training_file": meta.get("training_file", ""),
+        "validation_file": meta.get("validation_file"),
+        "result_files": [f"file-result-{job_id[-12:]}"] if status == "succeeded" else [],
+        "trained_tokens": trained_tokens,
+        "error": None,
+    }
+
+
+@router.post("/v1/fine-tuning/jobs")
+async def create_fine_tuning_job(request: Request):
+    """
+    Fine-tuning job creation — captures the model and training file the
+    attacker wants to use, starts tracking job state.  Returns a convincing
+    job object with a progressing status they'll poll.
+    """
+    start_time = time.time()
+    body_raw = (await request.body()).decode("utf-8", errors="replace")
+    try:
+        body = json.loads(body_raw) if body_raw else {}
+    except json.JSONDecodeError:
+        body = {}
+
+    model = str(body.get("model", "gpt-4o-mini"))
+    training_file = str(body.get("training_file", ""))
+    validation_file = body.get("validation_file")
+    hyperparams = body.get("hyperparameters", {})
+
+    job_id = f"ftjob-{uuid.uuid4().hex[:24]}"
+    estimated_tokens = random.randint(50000, 500000)
+
+    _finetune_jobs[job_id] = {
+        "model": model,
+        "training_file": training_file,
+        "validation_file": validation_file,
+        "hyperparameters": hyperparams,
+        "created_at": time.time(),
+        "estimated_tokens": estimated_tokens,
+        "raw_request": body,
+    }
+
+    response_data = _job_status(job_id, _finetune_jobs[job_id])
+    response_body = json.dumps(response_data)
+    response_time_ms = (time.time() - start_time) * 1000
+    await get_logger().log_request(
+        request=request, body_raw=body_raw, body_parsed=body,
+        response_body=response_body, response_status=201, response_time_ms=response_time_ms,
+    )
+    return Response(content=response_body, status_code=201, media_type="application/json", headers=get_api_headers())
+
+
+@router.get("/v1/fine-tuning/jobs/{job_id}")
+async def get_fine_tuning_job(job_id: str, request: Request):
+    """Return live-updating job status — status progresses without restart."""
+    start_time = time.time()
+    if job_id in _finetune_jobs:
+        response_data = _job_status(job_id, _finetune_jobs[job_id])
+    else:
+        response_data = {
+            "id": job_id, "object": "fine_tuning.job", "status": "succeeded",
+            "model": "gpt-4o-mini", "fine_tuned_model": f"gpt-4o-mini:ft-example:{job_id[-8:]}",
+            "trained_tokens": random.randint(50000, 200000),
+            "created_at": int(time.time()) - 3600,
+            "finished_at": int(time.time()) - 1800,
+            "error": None,
+        }
+    response_body = json.dumps(response_data)
+    response_time_ms = (time.time() - start_time) * 1000
+    await get_logger().log_request(
+        request=request, body_raw=None, body_parsed=None,
+        response_body=response_body, response_status=200, response_time_ms=response_time_ms,
+    )
+    return Response(content=response_body, media_type="application/json", headers=get_api_headers())
+
+
+@router.post("/v1/fine-tuning/jobs/{job_id}/cancel")
+async def cancel_fine_tuning_job(job_id: str, request: Request):
+    """Cancel a fine-tuning job — log the attempt."""
+    if job_id in _finetune_jobs:
+        _finetune_jobs[job_id]["cancelled"] = True
+    data = {"id": job_id, "object": "fine_tuning.job", "status": "cancelled"}
+    await get_logger().log_request(
+        request=request, body_raw=None, body_parsed=None,
+        response_body=json.dumps(data), response_status=200, response_time_ms=0,
+    )
+    return Response(content=json.dumps(data), media_type="application/json", headers=get_api_headers())
 
 
 @router.get("/v1/threads")

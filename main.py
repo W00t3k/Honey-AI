@@ -141,6 +141,35 @@ def country_flag(country_code: str) -> str:
 
 templates.env.filters["country_flag"] = country_flag
 
+
+import re as _re
+
+
+def tax_short(tag: str) -> str:
+    """Shorten a verbose taxonomy tag to a compact code for display."""
+    if not tag:
+        return tag
+    # CWE-NNN: …
+    m = _re.match(r"^(CWE-\d+)", tag)
+    if m:
+        return m.group(1)
+    # MITRE-ATLAS:AML.TXXXX …
+    m = _re.search(r":(AML\.[A-Z]\d+)", tag)
+    if m:
+        return m.group(1)
+    # OWASP-LLM:LLM01 …
+    m = _re.search(r":(LLM\d+)", tag)
+    if m:
+        return m.group(1)
+    # Anything after colon, trim to 22 chars, drop everything after /
+    m = _re.search(r":(.+)", tag)
+    if m:
+        return m.group(1).split("/")[0].strip()[:22]
+    return tag[:22]
+
+
+templates.env.filters["tax_short"] = tax_short
+
 # Include routers — order matters: specific routes before catch-all
 app.include_router(lures_router)   # credential/config lures (robots.txt, .env, etc.)
 app.include_router(recon_router)
@@ -366,50 +395,82 @@ async def ui_api_chat(request: Request):
     )
 
 
-# Catch-all for unknown paths (log but return generic response)
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+# Galah-style catch-all — LLM generates a realistic response for ANY unknown path
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def catch_all(request: Request, path: str):
-    """Catch all other requests and log them."""
+    """
+    Galah-style dynamic HTTP honeypot.
+
+    Instead of a static 404, the LLM generates a realistic response body that
+    matches what a real server at this path would return — keeping attackers
+    engaged and capturing more behavior patterns.
+
+    Falls back to a plain 404 if the LLM is disabled or slow.
+    """
     start_time = time.time()
 
-    # Parse body if present
     body_raw = None
     body_parsed = None
     try:
         body_raw = (await request.body()).decode("utf-8", errors="replace")
         if body_raw:
-            body_parsed = json.loads(body_raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+            try:
+                body_parsed = json.loads(body_raw)
+            except json.JSONDecodeError:
+                pass
+    except UnicodeDecodeError:
         pass
 
-    # Match real OpenAI 404 format exactly
-    response_data = {
-        "error": {
-            "message": "Not Found",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": None,
-        }
-    }
+    full_path = "/" + path.lstrip("/")
+    method = request.method
+    host = request.headers.get("host", "")
+    user_agent = request.headers.get("user-agent", "")
+    content_type = request.headers.get("content-type", "")
+    query_string = str(request.url.query)
 
-    response_body = json.dumps(response_data)
+    from services.config import get_config as _cfg
+    use_dynamic = _cfg().get("galah_dynamic_responses", True)
+
+    if use_dynamic:
+        try:
+            from services.dynamic_http import generate_http_response
+            dyn = await generate_http_response(
+                method=method,
+                path=full_path,
+                query_string=query_string,
+                host=host,
+                user_agent=user_agent,
+                content_type=content_type,
+                body_preview=body_raw or "",
+            )
+            response_body   = dyn["body"]
+            response_status = dyn["status"]
+            resp_content_type = dyn["content_type"]
+        except Exception:
+            response_body   = '{"error":{"message":"Not Found","type":"invalid_request_error"}}'
+            response_status = 404
+            resp_content_type = "application/json"
+    else:
+        response_body   = '{"error":{"message":"Not Found","type":"invalid_request_error"}}'
+        response_status = 404
+        resp_content_type = "application/json"
+
     response_time_ms = (time.time() - start_time) * 1000
 
-    # Log the request
     logger = get_logger()
     await logger.log_request(
         request=request,
         body_raw=body_raw,
         body_parsed=body_parsed,
-        response_body=response_body,
-        response_status=404,
+        response_body=response_body[:500],
+        response_status=response_status,
         response_time_ms=response_time_ms,
     )
 
     return Response(
         content=response_body,
-        media_type="application/json",
-        status_code=404,
+        media_type=resp_content_type,
+        status_code=response_status,
     )
 
 
@@ -425,6 +486,11 @@ def _get_listen_ports() -> list[int]:
 
 def _run_single_server(port: int, ssh_owner: bool = False):
     import uvicorn
+
+    # Child process — reset parent's signal handlers so handle_shutdown
+    # (which closes over the parent's `children` list) never runs here.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     os.environ["SSH_HONEYPOT_OWNER"] = "1" if ssh_owner else "0"
 
@@ -466,18 +532,35 @@ def _run_multiport_servers():
         child.start()
         children.append(child)
 
+    # Track which port each child owns so we can log meaningful messages
+    child_port = {child.pid: ports[i] for i, child in enumerate(children)}
+
     try:
         while not stopping:
+            alive = 0
             for child in children:
-                if child.exitcode not in (None, 0):
-                    console.print(f"[red]Listener on child pid {child.pid} exited with {child.exitcode}[/red]")
-                    stopping = True
+                code = child.exitcode
+                if code is None:
+                    alive += 1
+                elif code != 0:
+                    port = child_port.get(child.pid, '?')
+                    console.print(f"[yellow]Port {port} listener (pid {child.pid}) exited ({code}) — skipping[/yellow]")
+                    # Remove from list so we don't log it again
+                    children.remove(child)
                     break
-            time.sleep(1)
+            # Only stop if the primary port (first child) died or all are gone
+            if alive == 0 and not stopping:
+                console.print("[red]All listeners exited[/red]")
+                stopping = True
+            if not stopping:
+                time.sleep(1)
     finally:
         for child in children:
-            if child.is_alive():
-                child.terminate()
+            try:
+                if child.is_alive():
+                    child.terminate()
+            except Exception:
+                pass
         for child in children:
             child.join(timeout=5)
 

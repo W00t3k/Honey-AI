@@ -109,6 +109,50 @@ pid_running() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
+kill_stale() {
+  # 1. Kill by process name (main.py / uvicorn)
+  local pids
+  pids=$(pgrep -f "python main\.py\|uvicorn main:app" 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    warn "Killing stale honeypot processes: $pids"
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+  fi
+
+  # 2. Kill anything still holding honeypot ports (SSH 2222 + ports from config.json)
+  local ports="2222"
+  if [ -f "config.json" ]; then
+    # Extract all port numbers from config (additional_ports + "port" key)
+    local cfg_ports
+    cfg_ports=$(python3 -c "
+import json, os
+try:
+    cfg = json.load(open('config.json'))
+    pts = set()
+    pts.add(int(cfg.get('port', os.getenv('PORT', 80))))
+    for p in cfg.get('additional_ports', []):
+        pts.add(int(p))
+    print(' '.join(str(p) for p in pts))
+except Exception:
+    pass
+" 2>/dev/null || true)
+    [ -n "$cfg_ports" ] && ports="$ports $cfg_ports"
+  fi
+
+  for port in $ports; do
+    local holders
+    holders=$(lsof -ti TCP:"$port" 2>/dev/null || true)
+    if [ -n "$holders" ]; then
+      warn "Freeing port $port (PIDs: $holders)"
+      # shellcheck disable=SC2086
+      kill -9 $holders 2>/dev/null || true
+    fi
+  done
+
+  sleep 1
+  rm -f "$PID_FILE"
+}
+
 # ── sub-commands ──────────────────────────────────────────────────────────────
 cmd_status() {
   if pid_running; then
@@ -124,18 +168,8 @@ cmd_status() {
 }
 
 cmd_stop() {
-  if pid_running; then
-    PID=$(cat "$PID_FILE")
-    kill "$PID"
-    sleep 1
-    # Force-kill if still alive
-    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true
-    rm -f "$PID_FILE"
-    ok "Honeypot stopped  (was PID $PID)"
-  else
-    warn "Honeypot is not running (no PID file)"
-    rm -f "$PID_FILE"
-  fi
+  kill_stale
+  ok "Honeypot stopped"
   exit 0
 }
 
@@ -147,11 +181,7 @@ cmd_logs() {
 }
 
 cmd_bg() {
-  if pid_running; then
-    PID=$(cat "$PID_FILE")
-    warn "Honeypot already running  (PID $PID) — use --stop first or --restart"
-    exit 0
-  fi
+  kill_stale
   nohup python main.py > "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 1
@@ -190,6 +220,7 @@ case "$MODE" in
   --bg|--background) cmd_bg ;;
   --restart) cmd_restart ;;
   "")
+    kill_stale
     info "Starting in foreground  (Ctrl+C to stop)..."
     echo ""
     exec python main.py

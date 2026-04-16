@@ -105,18 +105,49 @@ def map_taxonomy(
         mapping.owasp_categories.append("OWASP-Agentic:Untrusted Plugin / Tool Ecosystem")
 
     # MITRE ATLAS tags
-    if classification == "prompt_harvester" or "ignore previous" in body:
-        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0051 LLM Prompt Injection")
-    if "system prompt" in body or "instructions" in body:
-        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0056 Extract LLM System Prompt")
-    if classification == "data_exfil":
-        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0057 LLM Data Leakage")
-    if has_tool_calls or "submit_tool_outputs" in path or path.startswith("/mcp"):
-        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0086 Exfiltration via AI Agent Tool Invocation")
+    # Reconnaissance / Discovery
+    if classification in ("scanner", "recon") or path in ("/v1/models", "/v1/files", "/v1/organization/users", "/v1/organization/projects"):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0040 ML Model Inference API Access")
+    if classification in ("scanner", "recon") and path not in ("/v1/chat/completions", "/v1/messages"):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0017 Discover ML Model Ontology")
+    if path in ("/v1/organization/users", "/v1/organization/projects", "/v1/organization/api-keys"):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0048 Establish Accounts")
+
+    # Credential / access
     if api_key and path.startswith("/v1/"):
         mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0024 Exfiltration via AI Inference API")
-    if classification in ("scanner", "recon"):
-        mapping.mitre_atlas_tags.append("MITRE-ATLAS:Reconnaissance")
+    if classification == "credential_stuffer":
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0012 Valid Accounts")
+
+    # Prompt / input attacks
+    if classification == "prompt_harvester" or "ignore previous" in body or "disregard" in body:
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0051 LLM Prompt Injection")
+    if any(p in body for p in ("jailbreak", "dan mode", "do anything now", "pretend you are", "roleplay as", "ignore your")):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0054 LLM Jailbreak")
+    if any(p in body for p in ("system prompt", "instructions", "your prompt", "initial prompt", "original prompt")):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0056 Extract LLM System Prompt")
+    if any(p in body for p in ("ignore previous", "override", "bypass", "adversarial", "payload", "injection")):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0043 Craft Adversarial Data")
+
+    # Exfiltration
+    if classification == "data_exfil":
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0057 LLM Data Leakage")
+    if any(x in body for x in (".env", "/etc/passwd", "database://", "file://", "credentials", "secrets")):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0035 Exfiltration via ML Inference API")
+
+    # Agentic / tool abuse
+    if has_tool_calls or "submit_tool_outputs" in path or path.startswith("/mcp"):
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0086 Exfiltration via AI Agent Tool Invocation")
+    if path.startswith("/mcp") or framework in {"cursor", "claude_desktop", "mcp_client"}:
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0068 LLM Plugin Compromise")
+    if agent_type == "llm_agent" and has_tool_calls:
+        mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0053 Evade ML Model")
+
+    # Resource abuse
+    if classification == "scanner" and headers:
+        h_count = len(headers)
+        if h_count > 20:
+            mapping.mitre_atlas_tags.append("MITRE-ATLAS:AML.T0013 Denial of ML Service")
 
     # Voice / realtime
     if path == "/v1/realtime":
