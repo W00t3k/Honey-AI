@@ -12,6 +12,7 @@ from .azure import router as azure_router
 from .cohere import router as cohere_router
 from .recon import router as recon_router
 from .lures import router as lures_router
+from .decoys import router as decoys_router
 from .admin import router as admin_router, set_database
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "cohere_router",
     "recon_router",
     "lures_router",
+    "decoys_router",
     "admin_router",
     "set_database",
 ]

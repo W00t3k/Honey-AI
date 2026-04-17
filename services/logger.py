@@ -310,6 +310,15 @@ class RequestLogger:
             "voice_metadata": taxonomy.voice_metadata,
         }
 
+        # Router-level override for threat_level + notes (used by decoy hits
+        # where we want to force CRITICAL severity at log time).
+        override_threat = getattr(request.state, "forced_threat_level", None) if hasattr(request, "state") else None
+        override_note = getattr(request.state, "forced_note", None) if hasattr(request, "state") else None
+        if override_threat:
+            request_data["threat_level"] = override_threat
+        if override_note:
+            request_data["notes"] = override_note
+
         # Merge engagement/tradecraft meta — either stashed on request.state
         # by the router or surfaced via the engagement ContextVar (set inside
         # responder.chat_completion_async).

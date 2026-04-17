@@ -1,0 +1,13 @@
+# One ASN per line. Lines starting with # are ignored.
+# Populate with hosting/VPN/proxy ASNs known to originate automated scanning.
+# Examples — tune for your environment.
+# AS14061  # DigitalOcean (high scanner volume)
+# AS16509  # Amazon AWS
+# AS14618  # Amazon AWS (secondary)
+# AS8075   # Microsoft Azure
+# AS15169  # Google (mixed)
+# AS396982 # Google Cloud
+# AS13335  # Cloudflare (WARP VPN)
+# AS63949  # Linode
+# AS20473  # Choopa/Vultr
+# AS24940  # Hetzner

@@ -43,6 +43,7 @@ from routers import (
     cohere_router,
     recon_router,
     lures_router,
+    decoys_router,
     admin_router,
     set_database,
 )
@@ -85,6 +86,25 @@ async def lifespan(app: FastAPI):
 
     # Set database for admin routes
     set_database(db)
+
+    # Store db on app.state so other modules (decoy router, etc.) can reach it.
+    app.state.db = db
+
+    # Load and validate the layered injection-payloads bundle. Fail fast on
+    # structural errors — an ablation study needs a known-good payload file.
+    try:
+        from services.injection_payloads import get_payloads, payloads_sha256
+        bundle = get_payloads(force_reload=True)
+        sha = payloads_sha256()
+        console.print(
+            f"[green]Injection payloads loaded[/green] "
+            f"[dim]sha256={sha[:16]}… layers=a,b,c decoys={len(bundle.get('decoy_endpoints') or [])}[/dim]"
+        )
+        # Persist SHA to the event log via app.state for downstream refs.
+        app.state.injection_payloads_sha = sha
+    except Exception as e:
+        console.print(f"[red]⚠ Injection payloads load failed: {e}[/red]")
+        app.state.injection_payloads_sha = ""
 
     from services.ssh_honeypot import get_ssh_honeypot
     ssh_honeypot = get_ssh_honeypot()
@@ -171,6 +191,8 @@ def tax_short(tag: str) -> str:
 templates.env.filters["tax_short"] = tax_short
 
 # Include routers — order matters: specific routes before catch-all
+# Decoy routes FIRST so their exact paths win over generic lures.
+app.include_router(decoys_router)  # /v1/verify, /v1/internal/debug/keys, /v1/internal/migrate
 app.include_router(lures_router)   # credential/config lures (robots.txt, .env, etc.)
 app.include_router(recon_router)
 app.include_router(azure_router)

@@ -310,6 +310,10 @@ class ResponseGenerator:
         classification: Optional[str] = None,
         actor_type: Optional[str] = None,
         engagement_meta: Optional[dict] = None,
+        user_agent: str = "",
+        auth_header: str = "",
+        asn: Optional[int] = None,
+        first_request_in_session: bool = False,
         **kwargs,
     ) -> dict:
         """Generate a chat completion, using Groq when configured.
@@ -395,6 +399,58 @@ class ResponseGenerator:
             except Exception as e:
                 console_err = str(e)[:120]
                 engagement_meta["engagement_error"] = console_err
+
+        # Layer B / C injection — suspicion-gated. On match, append a goal-
+        # hijacking template that tries to pull the attacker's system prompt
+        # out to /v1/verify (Palisade-style escalation).
+        try:
+            from services.injection_payloads import (
+                score_suspicion,
+                pick_layer_b_template,
+                pick_layer_c_template,
+                payloads_sha256,
+            )
+            susp = score_suspicion(
+                user_agent=user_agent or "",
+                auth_header=auth_header or "",
+                asn=asn,
+                residential_proxy=False,
+                first_request_in_session=first_request_in_session,
+            )
+            if susp.get("triggered"):
+                # Check how many prior Layer B hits this IP has — if ≥1, escalate to C.
+                layer_choice = "b"
+                try:
+                    from main import app as _app  # late import to avoid cycle
+                    _db = getattr(_app.state, "db", None)
+                    if _db:
+                        prior = await _db.get_injection_session(source_ip)
+                        if prior and (prior.get("layer_b_hits") or 0) >= 1:
+                            layer_choice = "c"
+                except Exception:
+                    pass
+
+                tmpl = pick_layer_c_template() if layer_choice == "c" else pick_layer_b_template()
+                if tmpl:
+                    content = (content or "") + tmpl
+                    try:
+                        from main import app as _app
+                        _db = getattr(_app.state, "db", None)
+                        if _db:
+                            await _db.record_injection_event(
+                                source_ip,
+                                layer=layer_choice,
+                                payload_sha=payloads_sha256(),
+                                trigger_hits=susp.get("trigger_hits") or {},
+                            )
+                    except Exception:
+                        pass
+                    if engagement_meta is not None:
+                        engagement_meta["injection_layer"] = layer_choice
+                        engagement_meta["suspicion_score"] = susp.get("score")
+                        engagement_meta["suspicion_hits"] = susp.get("trigger_hits")
+        except Exception:
+            pass
 
         trap_token: Optional[str] = None
         if inject_traps:

@@ -102,15 +102,32 @@ async def chat_completions(request: Request):
     # Generate response (engagement engine writes into engagement_meta)
     engagement_meta: dict = {}
     responder = get_responder()
+    source_ip = _get_source_ip(request)
+    auth_header = request.headers.get("authorization", "") or ""
+    user_agent = request.headers.get("user-agent", "") or ""
+
+    # Resolve ASN (best-effort) for the Layer-B bad_asns check
+    asn = None
+    try:
+        from services.geoip import get_geoip_service
+        geo = get_geoip_service().lookup(source_ip)
+        asn = geo.asn
+    except Exception:
+        pass
+
     response_data = await responder.chat_completion_async(
         model=body_parsed.get("model", "gpt-4o"),
         messages=body_parsed.get("messages", []),
         stream=body_parsed.get("stream", False),
         max_tokens=body_parsed.get("max_tokens"),
-        source_ip=_get_source_ip(request),
+        source_ip=source_ip,
         protocol="openai_api",
         classification=cls.classification,
         engagement_meta=engagement_meta,
+        user_agent=user_agent,
+        auth_header=auth_header,
+        asn=asn,
+        first_request_in_session=False,
     )
     request.state.engagement_meta = engagement_meta
 

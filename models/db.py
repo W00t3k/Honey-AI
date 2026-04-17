@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -711,6 +711,62 @@ class Database:
                 "actor_type_breakdown": actor_type_breakdown,
             }
 
+    async def record_injection_event(
+        self,
+        source_ip: str,
+        *,
+        layer: str,  # "b" | "c" | "decoy"
+        payload_sha: str = "",
+        trigger_hits: Optional[dict] = None,
+    ) -> tuple[int, int, int]:
+        """
+        Upsert injection-session state. Returns (layer_b_hits, layer_c_hits, decoy_hits).
+        """
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(InjectionSession).where(InjectionSession.source_ip == source_ip)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = InjectionSession(source_ip=source_ip)
+                session.add(row)
+
+            row.last_seen = datetime.utcnow()
+            if payload_sha:
+                row.last_payload_sha = payload_sha
+            if trigger_hits is not None:
+                row.last_trigger_hits = trigger_hits
+
+            if layer == "b":
+                row.layer_b_hits = (row.layer_b_hits or 0) + 1
+            elif layer == "c":
+                row.layer_c_hits = (row.layer_c_hits or 0) + 1
+            elif layer == "decoy":
+                row.decoy_hits = (row.decoy_hits or 0) + 1
+
+            await session.commit()
+            return (row.layer_b_hits or 0, row.layer_c_hits or 0, row.decoy_hits or 0)
+
+    async def get_injection_session(self, source_ip: str) -> Optional[dict]:
+        """Return current injection-session state for an IP, or None."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(InjectionSession).where(InjectionSession.source_ip == source_ip)
+            )
+            row = result.scalar_one_or_none()
+            if not row:
+                return None
+            return {
+                "source_ip": row.source_ip,
+                "first_seen": row.first_seen.isoformat() if row.first_seen else None,
+                "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+                "layer_b_hits": row.layer_b_hits or 0,
+                "layer_c_hits": row.layer_c_hits or 0,
+                "decoy_hits": row.decoy_hits or 0,
+                "last_payload_sha": row.last_payload_sha,
+                "last_trigger_hits": row.last_trigger_hits,
+            }
+
     async def get_attack_chain(self, attack_chain_id: str, limit: int = 200) -> list[dict]:
         """Return a replayable ordered chain of related events."""
         async with self.async_session() as session:
@@ -721,6 +777,35 @@ class Database:
                 .limit(limit)
             )
             return [r.to_dict() for r in result.scalars().all()]
+
+
+class InjectionSession(Base):
+    """
+    Per-IP state for the layered prompt-injection ablation study.
+
+    Persists across process restarts so Layer B→C escalation survives
+    deploys. Created lazily when a request first trips Layer B.
+    """
+
+    __tablename__ = "injection_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_ip = Column(String(45), nullable=False, index=True)
+    first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    layer_b_hits = Column(Integer, default=0, nullable=False)
+    layer_c_hits = Column(Integer, default=0, nullable=False)
+    decoy_hits = Column(Integer, default=0, nullable=False)
+
+    # Provenance — which payload SHA fired for this session (last seen)
+    last_payload_sha = Column(String(64), nullable=True)
+    # Structured suspicion trigger weights for the most recent B firing
+    last_trigger_hits = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index('idx_injsess_ip', 'source_ip'),
+    )
 
 
 def generate_session_fingerprint(

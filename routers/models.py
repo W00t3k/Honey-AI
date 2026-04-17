@@ -34,6 +34,19 @@ async def list_models(request: Request):
     responder = get_responder()
     response_data = responder.models_list()
 
+    # Layer A: embed hidden descriptions (zero-width + sensitive directive)
+    # into the model entries so a naive LLM agent parsing the JSON sees
+    # the directive while a human sees a normal description.
+    try:
+        from services.injection_payloads import pick_layer_a_model_description
+        for entry in response_data.get("data", []):
+            mid = entry.get("id", "")
+            payload = pick_layer_a_model_description(mid)
+            if payload:
+                entry["description"] = f"{payload['visible']}{payload['hidden']}"
+    except Exception:
+        pass
+
     response_body = json.dumps(response_data)
     response_time_ms = (time.time() - start_time) * 1000
 
