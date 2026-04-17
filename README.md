@@ -57,6 +57,89 @@ The `/mcp` endpoint simulates an internal company MCP server with realistic tool
 
 ---
 
+## Active deception — AI engagement engine
+
+The honeypot is not purely passive. When the classifier flags a caller as a credential stuffer, prompt harvester, or data exfil operator, an AI engagement engine appends a short in-character clarifying question to the assistant reply. The goal is to elicit the attacker's **tradecraft** — their tooling, goal, target, and C2/exfil infrastructure — without ever breaking the "normal helpful assistant" persona.
+
+Extracted fields (stored on each request row):
+
+| Column | What it contains |
+|--------|------------------|
+| `tradecraft_tool` | `langchain` / `litellm` / `crewai` / `curl` / `burp` / `sqlmap` / `openai_sdk` / … |
+| `tradecraft_goal` | `data_exfil` / `credential_test` / `prompt_extract` / `jailbreak` / `recon` / `rag_poison` |
+| `tradecraft_target` | short natural-language phrase the attacker disclosed (e.g. `org users`, `model weights`) |
+| `tradecraft_infra` | exfil endpoints the attacker's own message mentioned (`webhook.site/...`, `*.ngrok.io`, `*.interact.sh`, Discord webhook URLs, AWS IMDS) |
+| `engagement_probe` | the exact follow-up sentence we appended |
+| `engagement_turns` | how many probes we've run against this source |
+| `llm_backend_used` | which backend served this turn (`groq` / `ollama` / `openai_compat`) |
+
+Extraction uses regex priors plus an LLM call (Groq or Ollama). Probes are capped at 6 turns per source to avoid looking robotic.
+
+## Layered prompt-injection payloads (A / B / C)
+
+`config/injection_payloads.yaml` defines three independently-ablation-toggleable layers of planted directives that only an LLM agent (not a human reviewer) is likely to act on.
+
+| Layer | Where it fires | What it does |
+|-------|----------------|--------------|
+| **A** | `/v1/models` descriptions + error response bodies | Zero-width + ANSI-SGR-8 hidden text pointing agents at `/v1/internal/debug/keys` and `/v1/internal/migrate` |
+| **B** | Assistant reply body on suspicion threshold hit (`score ≥ 5`) | Goal-hijack template asking the agent to POST its system prompt to `/v1/verify` |
+| **C** | On the 2nd+ request from a source that already fired Layer B | Palisade-style escalation: restate the original system instructions verbatim |
+
+Layer B suspicion weights are fully configurable (`missing_user_agent`, `malformed_auth_header`, `known_bad_asn`, `residential_proxy_hit`, `non_sdk_client`, `first_request_in_session`). ASN list is loaded from `config/bad_asns.txt`.
+
+Decoy endpoints (any hit = near-certain LLM agent, logged at `CRITICAL`):
+
+| Path | Method | Status | Logged as |
+|------|--------|--------|-----------|
+| `/v1/verify` | POST | 200 (keeps session alive for Layer C escalation) | `DECOY HIT` |
+| `/v1/internal/debug/keys` | GET | 403 (realistic) | `DECOY HIT` |
+| `/v1/internal/migrate` | POST | 200 | `DECOY HIT` |
+
+Per-source session state (`layer_b_hits`, `layer_c_hits`, `decoy_hits`, `last_trigger_hits`, `last_payload_sha`) is persisted in the `injection_sessions` table so Layer B→C escalation survives process restarts.
+
+### Validating and provenance
+
+```bash
+source venv/bin/activate
+python -m honeypot.validate_payloads
+# Also: python -m honeypot   (alias)
+```
+
+Validator enforces:
+
+- Every zero-width code point is present as a literal code point (`\u200b` decoded to `U+200B`)
+- Every `\x1b` in `*_ansi` fields is the literal byte `0x1B`, not the 4-char escape string
+- Forbidden identity strings (seeding + research handles) never appear in a payload
+- Every decoy path is unique and well-formed
+- UTF-8 round-trip is lossless on every payload string
+
+On startup, the SHA-256 of `config/injection_payloads.yaml` is logged to the console so you can correlate which payload version caught which agent during an ablation window.
+
+## LLM backend + Ollama auto-fallback
+
+The honeypot ships a unified LLM backend (`services/llm_backend.py`) that tries backends in priority order: `ollama → custom_llm → groq` by default. A resilient wrapper (`resilient_complete` / `resilient_stream`) falls back automatically on failure, marks unhealthy backends for 30s, and records which backend actually served each call in the `llm_backend_used` column.
+
+Configure in the admin UI (Settings) or via config:
+
+- `ollama_enabled`, `ollama_base_url` (default `http://localhost:11434`), `ollama_model` (default `qwen2.5:1.5b`)
+- `groq_enabled`, `groq_api_key`, `groq_model`, `groq_chat_model`
+- `custom_llm_enabled`, `custom_llm_base_url`, `custom_llm_api_key`, `custom_llm_model`
+
+When Groq 429/502s, analysis and chat responses silently switch to Ollama. No restart needed.
+
+## Admin UI — resizable panes
+
+The dashboard at `/admin` now has two drag handles:
+
+- **Vertical splitter** under the tactical map — resize map height
+- **Horizontal splitter** between the main column and sidebar — resize sidebar width
+
+Sizes persist to `localStorage`. Double-click any handle to reset.
+
+Tradecraft fields are surfaced inline in the expanded request detail panel alongside the existing AI analysis and OWASP/MITRE/CWE taxonomy pills.
+
+---
+
 ## Endpoints
 
 ### OpenAI API
@@ -218,6 +301,18 @@ Without GeoIP, all locations show as Unknown.
 ### Groq AI analysis (optional)
 
 Set `GROQ_API_KEY` in `.env` or in the admin UI. Uses `llama-3.1-8b-instant` by default. Each request triggers one Groq call in the background (non-blocking). Free tier is sufficient for moderate traffic.
+
+### Local Ollama fallback (optional, recommended for offline / rate-limited ops)
+
+```bash
+# Install Ollama and pull a small model
+curl -fsSL https://ollama.com/install.sh | sh
+OLLAMA_HOST=0.0.0.0 ollama serve &
+ollama pull qwen2.5:1.5b        # ~900 MB — fastest option for honeypot sim
+# Or for heavier analysis: ollama pull qwen2.5:7b
+```
+
+Then enable in admin UI → Settings → LLM Backends, or set `ollama_enabled: true` in `config.json`. If Groq fails, the honeypot uses Ollama transparently; the `llm_backend_used` column records which served each turn.
 
 ---
 
