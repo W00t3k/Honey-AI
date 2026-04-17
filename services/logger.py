@@ -310,6 +310,25 @@ class RequestLogger:
             "voice_metadata": taxonomy.voice_metadata,
         }
 
+        # Merge engagement/tradecraft meta — either stashed on request.state
+        # by the router or surfaced via the engagement ContextVar (set inside
+        # responder.chat_completion_async).
+        engagement_meta = getattr(request.state, "engagement_meta", None) if hasattr(request, "state") else None
+        if not engagement_meta:
+            try:
+                from services.engagement import current_engagement_meta
+                engagement_meta = current_engagement_meta.get()
+            except Exception:
+                engagement_meta = None
+        if isinstance(engagement_meta, dict):
+            for k in (
+                "tradecraft_tool", "tradecraft_goal", "tradecraft_target",
+                "tradecraft_infra", "tradecraft_notes",
+                "engagement_turns", "engagement_probe", "llm_backend_used",
+            ):
+                if k in engagement_meta and engagement_meta[k] is not None:
+                    request_data[k] = engagement_meta[k]
+
         # Log to database first to get ID
         logged = await self.db.log_request(request_data)
         request_id = logged.id

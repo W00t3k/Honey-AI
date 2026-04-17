@@ -121,67 +121,35 @@ class GroqAnalyzer:
 
     async def analyze(self, request_data: dict) -> Optional[ThreatAnalysis]:
         """
-        Analyze a request using Groq LLM. Retries up to 3 times on transient errors.
+        Analyze a request via Groq with automatic Ollama fallback.
 
-        Returns ThreatAnalysis or None if analysis fails/disabled.
+        Returns ThreatAnalysis or None if analysis fails and no backend is
+        configured.
         """
-        if not self.enabled:
-            return None
-
         prompt = self._build_prompt(request_data)
-        last_error: Optional[str] = None
 
-        for attempt in range(3):
-            try:
-                client = await self._get_client()
-                response = await client.post(
-                    GROQ_API_URL,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are an elite cybersecurity threat analyst specializing in AI API abuse, "
-                                    "prompt injection, credential theft, and LLM-targeted attacks. "
-                                    "Analyze the honeypot request data and provide a structured threat assessment. "
-                                    "Be concise, specific, and actionable. Always respond with valid JSON only."
-                                ),
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.1,
-                        "max_tokens": 1200,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
+        system = (
+            "You are an elite cybersecurity threat analyst specializing in AI API abuse, "
+            "prompt injection, credential theft, and LLM-targeted attacks. "
+            "Analyze the honeypot request data and provide a structured threat assessment. "
+            "Be concise, specific, and actionable. Always respond with valid JSON only."
+        )
 
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result["choices"][0]["message"]["content"]
-                    return self._parse_response(content)
-                elif response.status_code in (429, 502, 503, 504):
-                    last_error = f"HTTP {response.status_code}"
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-                else:
-                    console.print(f"[red]Groq API error: {response.status_code}[/red]")
-                    return None
-
-            except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError) as e:
-                last_error = str(e)
-                await asyncio.sleep(2 ** attempt)
-                continue
-            except Exception as e:
-                console.print(f"[red]Groq analysis error: {e}[/red]")
+        # Route through the resilient facade: Groq → Ollama → others.
+        try:
+            from services.llm_backend import resilient_complete
+            content = await resilient_complete(
+                [{"role": "user", "content": prompt}],
+                system_prompt=system,
+                temperature=0.1,
+                max_tokens=1200,
+            )
+            if not content:
                 return None
-
-        console.print(f"[red]Groq analysis failed after 3 attempts: {last_error}[/red]")
-        return None
+            return self._parse_response(content)
+        except Exception as e:
+            console.print(f"[red]Analyzer error: {e}[/red]")
+            return None
 
     def _build_prompt(self, request_data: dict) -> str:
         """Build the analysis prompt from request data."""

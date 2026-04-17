@@ -4,10 +4,17 @@ Unified LLM backend — supports Groq, Ollama (local), and any OpenAI-compatible
 LLMHoney showed that local models like Qwen2.5:1.5B and Phi3:3.8B offer the best
 balance of accuracy and latency for high-volume honeypot simulation.  This module
 lets operators switch backends without touching any other code.
+
+Includes a resilient facade (`resilient_complete` / `resilient_stream`) that
+tries the configured default backend, then falls back to Ollama on failure,
+then returns an empty string. Tracks which backend actually served each call
+via `get_last_backend_used()`.
 """
 
+import asyncio
 import json
 import os
+import time
 from typing import AsyncIterator, Optional
 
 import httpx
@@ -16,6 +23,11 @@ from rich.console import Console
 from services.config import get_config
 
 console = Console()
+
+# Circuit-breaker state per backend name
+_BACKEND_HEALTH: dict[str, dict] = {}
+_LAST_BACKEND_USED: str = "none"
+_HEALTHCHECK_TTL = 30.0  # seconds — re-probe at most this often
 
 
 # ── Backend registry ───────────────────────────────────────────────────────────
@@ -332,7 +344,178 @@ def get_http_backend() -> LLMBackend:
 
 def reload_all_backends() -> None:
     """Force-reload all cached backends (called after config change)."""
-    global _backends
+    global _backends, _BACKEND_HEALTH
     for b in _backends.values():
         if hasattr(b, "_reload"):
             b._reload()
+    _BACKEND_HEALTH.clear()
+
+
+# ── Health check + resilient wrapper ──────────────────────────────────────────
+
+def get_last_backend_used() -> str:
+    """Name of the backend that served the most recent resilient call."""
+    return _LAST_BACKEND_USED
+
+
+def _mark_health(name: str, ok: bool) -> None:
+    state = _BACKEND_HEALTH.setdefault(name, {"failures": 0, "last_probe": 0.0, "healthy": True})
+    if ok:
+        state["failures"] = 0
+        state["healthy"] = True
+    else:
+        state["failures"] += 1
+        if state["failures"] >= 2:
+            state["healthy"] = False
+    state["last_probe"] = time.time()
+
+
+async def _probe_backend(backend: LLMBackend) -> bool:
+    """Cheap health probe — try a 1-token completion with tight timeout."""
+    try:
+        if not getattr(backend, "enabled", False):
+            return False
+
+        # Groq / custom: HEAD-style probe by attempting a tiny request
+        if backend.name == "ollama":
+            # ollama has /api/tags — fastest check
+            try:
+                base = getattr(backend, "base_url", "")
+                if base:
+                    async with httpx.AsyncClient(timeout=1.5) as c:
+                        r = await c.get(f"{base.rstrip('/')}/api/tags")
+                        return r.status_code == 200
+            except Exception:
+                return False
+
+        # For http backends, assume healthy unless a prior call failed
+        state = _BACKEND_HEALTH.get(backend.name, {})
+        return state.get("healthy", True)
+    except Exception:
+        return False
+
+
+def _fallback_order() -> list[str]:
+    """Preferred order of backends to try based on config."""
+    cfg = get_config()
+    order = []
+    # Primary choice
+    if cfg.get("ollama_enabled"):
+        order.append("ollama")
+    elif cfg.get("custom_llm_enabled"):
+        order.append("openai_compat")
+    else:
+        order.append("groq")
+
+    # Fallbacks (deduped)
+    for candidate in ("groq", "ollama", "openai_compat"):
+        if candidate not in order:
+            order.append(candidate)
+    return order
+
+
+async def resilient_complete(
+    messages: list[dict],
+    *,
+    system_prompt: str = "",
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+) -> str:
+    """
+    Try backends in fallback order. Returns the first non-empty reply.
+    Records which backend served the call.
+    """
+    global _LAST_BACKEND_USED
+
+    for name in _fallback_order():
+        try:
+            backend = get_backend(name)
+            if not getattr(backend, "enabled", False):
+                continue
+
+            # Re-probe if we've recently marked this backend unhealthy
+            state = _BACKEND_HEALTH.get(name, {})
+            if not state.get("healthy", True):
+                if (time.time() - state.get("last_probe", 0.0)) < _HEALTHCHECK_TTL:
+                    continue  # still cooling down
+                # Probe expired — try again
+
+            out = await backend.complete(
+                messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if out:
+                _mark_health(name, True)
+                _LAST_BACKEND_USED = name
+                return out
+            _mark_health(name, False)
+        except Exception as e:
+            console.print(f"[dim]resilient_complete[{name}] failed: {e}[/dim]")
+            _mark_health(name, False)
+            continue
+
+    _LAST_BACKEND_USED = "none"
+    return ""
+
+
+async def resilient_stream(
+    messages: list[dict],
+    *,
+    system_prompt: str = "",
+) -> AsyncIterator[str]:
+    """
+    Stream from the primary backend. If it fails the first yield, fall
+    back to the next healthy backend transparently.
+    """
+    global _LAST_BACKEND_USED
+
+    for name in _fallback_order():
+        backend = get_backend(name)
+        if not getattr(backend, "enabled", False):
+            continue
+
+        state = _BACKEND_HEALTH.get(name, {})
+        if not state.get("healthy", True):
+            if (time.time() - state.get("last_probe", 0.0)) < _HEALTHCHECK_TTL:
+                continue
+
+        try:
+            first = True
+            async for chunk in backend.stream(messages, system_prompt=system_prompt):
+                if first:
+                    _mark_health(name, True)
+                    _LAST_BACKEND_USED = name
+                    first = False
+                yield chunk
+            return
+        except Exception as e:
+            console.print(f"[dim]resilient_stream[{name}] failed: {e}[/dim]")
+            _mark_health(name, False)
+            continue
+
+    _LAST_BACKEND_USED = "none"
+    # All backends failed — emit OpenAI-compatible error stream
+    yield 'data: {"choices":[{"delta":{"content":"Service temporarily unavailable"},"finish_reason":null}]}\n\n'
+    yield "data: [DONE]\n\n"
+
+
+async def backend_status() -> dict:
+    """Snapshot of configured backends + health for admin UI."""
+    cfg = get_config()
+    out = {}
+    for name in ("groq", "ollama", "openai_compat"):
+        b = get_backend(name)
+        state = _BACKEND_HEALTH.get(name, {})
+        out[name] = {
+            "enabled": bool(getattr(b, "enabled", False)),
+            "model":   getattr(b, "model", ""),
+            "healthy": state.get("healthy", True),
+            "failures": state.get("failures", 0),
+            "last_probe": state.get("last_probe", 0.0),
+        }
+    out["preferred_order"] = _fallback_order()
+    out["last_used"] = _LAST_BACKEND_USED
+    return out
+

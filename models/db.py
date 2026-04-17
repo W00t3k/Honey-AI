@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -82,6 +82,25 @@ SCHEMA_MIGRATIONS = {
     7: [
         # CWE weakness mappings (e.g. CWE-74, CWE-200)
         ("cwe_ids", "JSON"),
+    ],
+    8: [
+        # AI engagement engine — attacker tradecraft extraction
+        # Tool/framework used: langchain|curl|burp|custom_script|mcp_client|unknown
+        ("tradecraft_tool", "VARCHAR(80)"),
+        # Attacker stated/inferred goal: data_exfil|credential_test|prompt_extract|jailbreak|recon|unknown
+        ("tradecraft_goal", "VARCHAR(60)"),
+        # Target of interest: model_name|org|api_key|user_list|file|unknown
+        ("tradecraft_target", "VARCHAR(120)"),
+        # C2/infra: webhook|ngrok|interact.sh|burpcollaborator|dns_tunnel|unknown
+        ("tradecraft_infra", "VARCHAR(200)"),
+        # Engagement turn counter — how many probe/response pairs exchanged
+        ("engagement_turns", "INTEGER"),
+        # Engagement probe sent this request (text of our follow-up)
+        ("engagement_probe", "TEXT"),
+        # Raw tradecraft extraction notes (free-form)
+        ("tradecraft_notes", "TEXT"),
+        # Backend LLM actually used: groq|ollama|openai_compat|static
+        ("llm_backend_used", "VARCHAR(30)"),
     ],
 }
 
@@ -158,6 +177,16 @@ class Request(Base):
     voice_profile = Column(String(50), nullable=True)
     voice_metadata = Column(JSON, nullable=True)
     cwe_ids = Column(JSON, nullable=True)
+
+    # AI engagement engine — attacker tradecraft
+    tradecraft_tool = Column(String(80), nullable=True, index=True)
+    tradecraft_goal = Column(String(60), nullable=True, index=True)
+    tradecraft_target = Column(String(120), nullable=True)
+    tradecraft_infra = Column(String(200), nullable=True)
+    engagement_turns = Column(Integer, nullable=True)
+    engagement_probe = Column(Text, nullable=True)
+    tradecraft_notes = Column(Text, nullable=True)
+    llm_backend_used = Column(String(30), nullable=True, index=True)
 
     # Metadata
     is_flagged = Column(Boolean, default=False, index=True)
@@ -240,6 +269,14 @@ class Request(Base):
             "ai_confidence": self.ai_confidence,
             "ai_analyzed_at": self.ai_analyzed_at.isoformat() if self.ai_analyzed_at else None,
             "ai_actor_type": self.ai_actor_type,
+            "tradecraft_tool": self.tradecraft_tool,
+            "tradecraft_goal": self.tradecraft_goal,
+            "tradecraft_target": self.tradecraft_target,
+            "tradecraft_infra": self.tradecraft_infra,
+            "engagement_turns": self.engagement_turns,
+            "engagement_probe": self.engagement_probe,
+            "tradecraft_notes": self.tradecraft_notes,
+            "llm_backend_used": self.llm_backend_used,
         }
 
 

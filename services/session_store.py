@@ -43,6 +43,10 @@ class SessionStore:
         )
         # Persistent shell state per IP
         self._shell_state: dict[str, ShellState] = {}
+        # Engagement turn counter per (protocol, source) — how many probes sent
+        self._engagement_turns: dict[str, int] = defaultdict(int)
+        # Accumulated tradecraft per source (survives across turns)
+        self._tradecraft: dict[str, dict] = defaultdict(dict)
 
     def _chat_key(self, source: str, protocol: str) -> str:
         return f"{protocol}:{source or 'unknown'}"
@@ -126,6 +130,34 @@ class SessionStore:
         with self._lock:
             state = self._shell_state.setdefault(self._shell_key(source), ShellState())
             state.env[key] = value
+
+    # ── Engagement tracking ───────────────────────────────────────────────────
+
+    def get_engagement_turn(self, source: str, protocol: str = "openai_api") -> int:
+        """Return current engagement turn count for this source/protocol."""
+        with self._lock:
+            return self._engagement_turns[self._chat_key(source, protocol)]
+
+    def bump_engagement_turn(self, source: str, protocol: str = "openai_api") -> int:
+        """Increment and return the new turn count."""
+        with self._lock:
+            key = self._chat_key(source, protocol)
+            self._engagement_turns[key] += 1
+            return self._engagement_turns[key]
+
+    def get_tradecraft(self, source: str) -> dict:
+        """Return accumulated tradecraft fields for this source."""
+        with self._lock:
+            return dict(self._tradecraft[self._shell_key(source)])
+
+    def merge_tradecraft(self, source: str, fields: dict) -> dict:
+        """Merge new non-empty tradecraft fields into accumulated state."""
+        with self._lock:
+            key = self._shell_key(source)
+            for k, v in (fields or {}).items():
+                if v and v != "unknown":
+                    self._tradecraft[key][k] = v
+            return dict(self._tradecraft[key])
 
     def _coerce_content(self, content: object) -> str:
         """Flatten provider-specific content blocks into text."""

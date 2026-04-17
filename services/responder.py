@@ -307,15 +307,94 @@ class ResponseGenerator:
         inject_traps: bool = True,
         source_ip: str = "unknown",
         protocol: str = "openai_api",
+        classification: Optional[str] = None,
+        actor_type: Optional[str] = None,
+        engagement_meta: Optional[dict] = None,
         **kwargs,
     ) -> dict:
-        """Generate a chat completion, using Groq when configured."""
+        """Generate a chat completion, using Groq when configured.
+
+        If `engagement_meta` is provided (mutable dict), it is populated with
+        tradecraft + probe details so the caller can record them alongside
+        the request log.
+        """
         content = await self._generate_dynamic_content(
             messages=messages,
             max_tokens=max_tokens,
             source_ip=source_ip,
             protocol=protocol,
         )
+
+        # Auto-allocate engagement meta dict so every caller benefits
+        # (even routers that don't pass one explicitly). The logger reads
+        # it via ContextVar.
+        if engagement_meta is None:
+            engagement_meta = {}
+        try:
+            from services.engagement import current_engagement_meta
+            current_engagement_meta.set(engagement_meta)
+        except Exception:
+            pass
+
+        # ── Engagement: extract tradecraft from last user msg + add probe ──
+        if engagement_meta is not None:
+            try:
+                from services.engagement import get_engagement_engine
+                from services.llm_backend import get_last_backend_used
+
+                engine = get_engagement_engine()
+                store = get_session_store()
+
+                # Last user text
+                last_user = ""
+                for m in reversed(messages or []):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        c = m.get("content", "")
+                        if isinstance(c, list):
+                            c = " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+                        last_user = str(c)[:2000]
+                        break
+
+                tc = await engine.extract(last_user)
+                accumulated = store.merge_tradecraft(source_ip, {
+                    "tool":   tc.tool,
+                    "goal":   tc.goal,
+                    "target": tc.target,
+                    "infra":  tc.infra,
+                })
+
+                turn = store.get_engagement_turn(source_ip, protocol)
+                from services.engagement import TradeCraft as _TC
+                acc_tc = _TC(
+                    tool=accumulated.get("tool"),
+                    goal=accumulated.get("goal"),
+                    target=accumulated.get("target"),
+                    infra=accumulated.get("infra"),
+                )
+                probe_field = engine.should_probe(
+                    classification=classification,
+                    actor_type=actor_type,
+                    turn=turn,
+                    already_have=acc_tc,
+                )
+                probe_text = ""
+                if probe_field:
+                    probe_text = await engine.make_probe(content, target_field=probe_field)
+                    if probe_text:
+                        content = engine.append_probe(content, probe_text)
+                        store.bump_engagement_turn(source_ip, protocol)
+
+                engagement_meta["tradecraft_tool"]   = accumulated.get("tool")
+                engagement_meta["tradecraft_goal"]   = accumulated.get("goal")
+                engagement_meta["tradecraft_target"] = accumulated.get("target")
+                engagement_meta["tradecraft_infra"]  = accumulated.get("infra")
+                engagement_meta["tradecraft_notes"]  = tc.notes or None
+                engagement_meta["engagement_probe"]  = probe_text or None
+                engagement_meta["engagement_turns"]  = turn + (1 if probe_text else 0)
+                engagement_meta["llm_backend_used"]  = get_last_backend_used()
+            except Exception as e:
+                console_err = str(e)[:120]
+                engagement_meta["engagement_error"] = console_err
 
         trap_token: Optional[str] = None
         if inject_traps:

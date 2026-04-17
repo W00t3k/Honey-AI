@@ -91,86 +91,35 @@ class GroqChatService:
         temperature: float = 0.7,
         max_tokens: int = 1024,
     ) -> str:
-        """Return a non-streaming completion."""
-        if not self.enabled or not messages:
+        """Return a non-streaming completion with Groq→Ollama auto-fallback."""
+        if not messages:
             return ""
 
-        full_messages = [{"role": "system", "content": system_prompt}] + messages[-20:]
-
-        try:
-            client = await self._get_client()
-            response = await client.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": full_messages,
-                    "stream": False,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-            )
-            if response.status_code != 200:
-                console.print(
-                    f"[red]Groq completion error {response.status_code}: {response.text[:200]}[/red]"
-                )
-                return ""
-
-            payload = response.json()
-            choices = payload.get("choices") or []
-            message = choices[0].get("message", {}) if choices else {}
-            content = message.get("content", "")
-            return content.strip() if isinstance(content, str) else ""
-        except Exception as exc:
-            console.print(f"[red]Groq completion error: {exc}[/red]")
-            return ""
+        # Delegate to resilient wrapper so a dead Groq key transparently
+        # falls back to Ollama (or any other configured backend).
+        from services.llm_backend import resilient_complete
+        return await resilient_complete(
+            messages,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
         """
-        Stream chat completion as SSE lines.
+        Stream chat completion as SSE lines, with Groq→Ollama fallback.
         Yields lines in OpenAI SSE format: 'data: {...}\\n\\n'
         """
-        if not self.enabled or not messages:
-            yield 'data: {"choices":[{"delta":{"content":"Sorry, I\'m having trouble right now. Please try again."},"index":0,"finish_reason":null}]}\n\n'
+        if not messages:
+            yield 'data: {"choices":[{"delta":{"content":""},"index":0,"finish_reason":"stop"}]}\n\n'
             yield "data: [DONE]\n\n"
             return
 
-        full_messages = [{"role": "system", "content": HONEYPOT_SYSTEM_PROMPT}] + messages[-20:]
-
-        try:
-            client = await self._get_client()
-            async with client.stream(
-                "POST",
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": full_messages,
-                    "stream": True,
-                    "temperature": 0.7,
-                    "max_tokens": 1024,
-                },
-            ) as response:
-                if response.status_code != 200:
-                    body = await response.aread()
-                    console.print(f"[red]Groq chat error {response.status_code}: {body[:200]}[/red]")
-                    yield 'data: {"choices":[{"delta":{"content":"I\'m having trouble connecting. Please try again."},"index":0,"finish_reason":null}]}\n\n'
-                    yield "data: [DONE]\n\n"
-                    return
-
-                async for line in response.aiter_lines():
-                    if line:
-                        yield f"{line}\n\n"
-        except Exception as exc:
-            console.print(f"[red]Groq chat stream error: {exc}[/red]")
-            yield 'data: {"choices":[{"delta":{"content":"Connection error. Please try again."},"index":0,"finish_reason":null}]}\n\n'
-            yield "data: [DONE]\n\n"
+        from services.llm_backend import resilient_stream
+        async for chunk in resilient_stream(
+            messages, system_prompt=HONEYPOT_SYSTEM_PROMPT
+        ):
+            yield chunk
 
 
 # Singleton

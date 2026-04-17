@@ -87,7 +87,20 @@ async def chat_completions(request: Request):
     # Add realistic delay
     await add_realistic_delay()
 
-    # Generate response
+    # Cheap classifier pre-pass so the engagement engine knows who we're
+    # talking to before crafting a probe.
+    from services.classifier import get_classifier
+    cls = get_classifier().classify(
+        user_agent=request.headers.get("user-agent", ""),
+        api_key=(request.headers.get("authorization", "") or "").replace("Bearer ", "").strip(),
+        messages=body_parsed.get("messages", []),
+        path=str(request.url.path),
+        headers=dict(request.headers),
+        body=body_raw,
+    )
+
+    # Generate response (engagement engine writes into engagement_meta)
+    engagement_meta: dict = {}
     responder = get_responder()
     response_data = await responder.chat_completion_async(
         model=body_parsed.get("model", "gpt-4o"),
@@ -96,7 +109,10 @@ async def chat_completions(request: Request):
         max_tokens=body_parsed.get("max_tokens"),
         source_ip=_get_source_ip(request),
         protocol="openai_api",
+        classification=cls.classification,
+        engagement_meta=engagement_meta,
     )
+    request.state.engagement_meta = engagement_meta
 
     response_body = json.dumps(response_data)
     response_time_ms = (time.time() - start_time) * 1000
