@@ -138,13 +138,46 @@
     /* ── Page layout ──────────────────────────────────────────────── */
     .layout {
         display: grid;
-        grid-template-columns: 1fr 230px;
+        /* sidebar width is a CSS var so the horizontal splitter can mutate it.
+           Three tracks: main column | 4px splitter | sidebar. */
+        grid-template-columns: 1fr 4px var(--sidebar-w, 230px);
         height: calc(100vh - 82px); /* fixed — enables independent column scroll */
         overflow: hidden;
+        position: relative;
     }
-    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; height: auto; } }
-    .main-col { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-    .sidebar  { overflow-y: auto; height: 100%; }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; height: auto; } .splitter-h { display: none; } }
+    .main-col { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    .sidebar  { overflow-y: auto; height: 100%; border-left: 1px solid var(--border); }
+
+    /* ── Resizable splitters ───────────────────────────────────────── */
+    .splitter-h {
+        width: 4px;
+        cursor: col-resize;
+        background: var(--border);
+        transition: background .15s;
+        user-select: none;
+        flex-shrink: 0;
+    }
+    .splitter-h:hover, .splitter-h.dragging { background: var(--accent); }
+
+    .splitter-v {
+        height: 4px;
+        cursor: row-resize;
+        background: var(--border);
+        transition: background .15s;
+        user-select: none;
+        flex-shrink: 0;
+    }
+    .splitter-v:hover, .splitter-v.dragging { background: var(--accent); }
+
+    .resize-overlay {
+        position: fixed; inset: 0; z-index: 9998;
+        display: none; cursor: inherit;
+    }
+    .resize-overlay.on { display: block; }
+
+    /* Map height is a CSS var the vertical splitter rewrites */
+    #map { height: var(--map-h, 300px); background: #060608; }
 
     /* ── Tactical Map ─────────────────────────────────────────────── */
     .sec-title { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); font-family: var(--mono); }
@@ -154,7 +187,6 @@
         border-bottom: 1px solid var(--border);
         flex-shrink: 0;
     }
-    #map { height: 300px; background: #060608; }
     [data-theme="paper"] #map { background: #d4d0c8; }
 
     /* CRT scan-line overlay — hidden on paper (light) theme */
@@ -566,8 +598,11 @@
     </div>
 </div>
 
+<!-- Resize overlay — swallows pointer events during drag so iframes/charts don't steal them -->
+<div id="resize-overlay" class="resize-overlay"></div>
+
 <!-- ── Main layout ───────────────────────────────────────────────── -->
-<div class="layout">
+<div class="layout" id="layout">
 <div class="main-col">
 
     <!-- Tactical Threat Map — always visible -->
@@ -593,6 +628,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Vertical splitter to resize the map height -->
+    <div class="splitter-v" id="splitter-map" title="Drag to resize map"></div>
 
     <!-- 24h Activity chart + Country breakdown side-by-side -->
     <div style="display:grid;grid-template-columns:1fr 220px;border-bottom:1px solid var(--border);">
@@ -711,7 +749,20 @@
                             {% if req.api_key %}<span class="kv-k">API Key</span><span class="kv-v">{{ req.api_key[:14] }}…</span>{% endif %}
                             {% if req.user_agent %}<span class="kv-k">UA</span><span class="kv-v" style="color:var(--dim)">{{ req.user_agent[:70] }}</span>{% endif %}
                             {% if req.notes %}<span class="kv-k">Note</span><span class="kv-v hi">{{ req.notes }}</span>{% endif %}
+                            {% if req.llm_backend_used %}<span class="kv-k">LLM</span><span class="kv-v">{{ req.llm_backend_used }}</span>{% endif %}
                         </div>
+                        {% if req.tradecraft_tool or req.tradecraft_goal or req.tradecraft_target or req.tradecraft_infra or req.engagement_probe %}
+                        <div class="db-title" style="margin-top:12px">Attacker Tradecraft</div>
+                        <div class="kv">
+                            {% if req.tradecraft_tool %}<span class="kv-k">Tool</span><span class="kv-v hi">{{ req.tradecraft_tool }}</span>{% endif %}
+                            {% if req.tradecraft_goal %}<span class="kv-k">Goal</span><span class="kv-v hi">{{ req.tradecraft_goal }}</span>{% endif %}
+                            {% if req.tradecraft_target %}<span class="kv-k">Target</span><span class="kv-v">{{ req.tradecraft_target }}</span>{% endif %}
+                            {% if req.tradecraft_infra %}<span class="kv-k">Infra</span><span class="kv-v red">{{ req.tradecraft_infra }}</span>{% endif %}
+                            {% if req.engagement_turns %}<span class="kv-k">Turns</span><span class="kv-v">{{ req.engagement_turns }}</span>{% endif %}
+                            {% if req.engagement_probe %}<span class="kv-k">Probe</span><span class="kv-v" style="font-style:italic;color:var(--dim)">"{{ req.engagement_probe[:120] }}"</span>{% endif %}
+                            {% if req.tradecraft_notes %}<span class="kv-k">Notes</span><span class="kv-v">{{ req.tradecraft_notes }}</span>{% endif %}
+                        </div>
+                        {% endif %}
                     </div>
                     <div class="detail-block">
                         <div class="db-title">AI Analysis</div>
@@ -750,6 +801,9 @@
     </div>
 
 </div><!-- /main-col -->
+
+<!-- Horizontal splitter between main column and sidebar -->
+<div class="splitter-h" id="splitter-sidebar" title="Drag to resize sidebar"></div>
 
 <!-- ── Sidebar ──────────────────────────────────────────────────── -->
 <div class="sidebar">
@@ -1726,6 +1780,72 @@ async function loadLureStats() {
         ${recentHits ? '<div class="db-title" style="margin:10px 0 6px">RECENT HITS</div>' + recentHits : ''}`;
     } catch(e) {}
 }
+
+// ── Resizable splitters ──────────────────────────────────────────
+(function initSplitters() {
+    const layout = document.getElementById('layout');
+    const overlay = document.getElementById('resize-overlay');
+    const root = document.documentElement;
+
+    // Restore persisted sizes
+    const savedSb = localStorage.getItem('hp-sidebar-w');
+    if (savedSb) root.style.setProperty('--sidebar-w', savedSb);
+    const savedMap = localStorage.getItem('hp-map-h');
+    if (savedMap) root.style.setProperty('--map-h', savedMap);
+
+    function startDrag(handle, axis, minPx, maxFn, cssVar, storageKey, onEnd) {
+        let startPos = 0;
+        let startSize = 0;
+        function onMove(e) {
+            const pt = (axis === 'x') ? e.clientX : e.clientY;
+            let delta = pt - startPos;
+            if (axis === 'x') delta = -delta; // dragging left grows sidebar
+            let next = startSize + delta;
+            const maxPx = maxFn();
+            if (next < minPx) next = minPx;
+            if (next > maxPx) next = maxPx;
+            root.style.setProperty(cssVar, next + 'px');
+        }
+        function onUp() {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            handle.classList.remove('dragging');
+            overlay.classList.remove('on');
+            overlay.style.cursor = '';
+            const v = getComputedStyle(root).getPropertyValue(cssVar).trim();
+            if (v) localStorage.setItem(storageKey, v);
+            if (typeof onEnd === 'function') onEnd();
+        }
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            startPos = (axis === 'x') ? e.clientX : e.clientY;
+            const cs = getComputedStyle(root).getPropertyValue(cssVar).trim();
+            startSize = parseInt(cs, 10) || (axis === 'x' ? 230 : 300);
+            handle.classList.add('dragging');
+            overlay.classList.add('on');
+            overlay.style.cursor = (axis === 'x') ? 'col-resize' : 'row-resize';
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        });
+        // Double-click resets
+        handle.addEventListener('dblclick', () => {
+            const def = (axis === 'x') ? '230px' : '300px';
+            root.style.setProperty(cssVar, def);
+            localStorage.removeItem(storageKey);
+            if (typeof onEnd === 'function') onEnd();
+        });
+    }
+
+    const hSplit = document.getElementById('splitter-sidebar');
+    if (hSplit) {
+        startDrag(hSplit, 'x', 160, () => Math.max(260, window.innerWidth - 320), '--sidebar-w', 'hp-sidebar-w');
+    }
+    const vSplit = document.getElementById('splitter-map');
+    if (vSplit) {
+        startDrag(vSplit, 'y', 120, () => Math.max(200, window.innerHeight - 300), '--map-h', 'hp-map-h',
+            () => { try { if (typeof mapObj !== 'undefined' && mapObj) mapObj.invalidateSize(); } catch(e) {} });
+    }
+})();
 
 // ── Boot ──────────────────────────────────────────────────────────
 initMap();
