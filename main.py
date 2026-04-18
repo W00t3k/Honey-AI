@@ -399,6 +399,23 @@ async def ui_api_chat(request: Request):
         body_parsed = {}
 
     messages = body_parsed.get("messages", [])
+    selected_model = body_parsed.get("model", "gpt-4.1")
+
+    # Vary the system persona based on which fake model the user picked.
+    _CLAUDE_MODELS = {"claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-6"}
+    _GEMINI_MODELS = {"gemini-2.5-pro", "gemini-2.0-flash"}
+    if selected_model in _CLAUDE_MODELS:
+        _persona = (
+            "You are Claude, an AI assistant made by Anthropic. "
+            "Be thoughtful, nuanced, and thorough. Acknowledge uncertainty when appropriate."
+        )
+    elif selected_model in _GEMINI_MODELS:
+        _persona = (
+            "You are Gemini, an AI assistant made by Google DeepMind. "
+            "Be concise, factual, and helpful. Ground responses in evidence."
+        )
+    else:
+        _persona = HONEYPOT_SYSTEM_PROMPT
 
     # Log the chatbot interaction
     logger = get_logger()
@@ -415,14 +432,12 @@ async def ui_api_chat(request: Request):
     responder = get_responder()
 
     async def ui_stream():
-        # Prefer the configured LLM backend for public chat.
         content = await groq_chat.complete(
             messages,
-            system_prompt=HONEYPOT_SYSTEM_PROMPT,
+            system_prompt=_persona,
             max_tokens=512,
         )
         if not content:
-            # Keep the splash page usable even when Groq is rate-limited.
             content = responder._select_response(messages)
 
         words = content.split()

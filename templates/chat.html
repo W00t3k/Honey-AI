@@ -164,6 +164,7 @@
             border-radius: 8px;
             margin: 1px 4px;
         }
+        .model-opt * { pointer-events: none; }
         .model-opt:hover { background: rgba(255,255,255,0.05); }
         .model-opt.active { background: rgba(255,255,255,0.07); }
 
@@ -775,12 +776,19 @@ function toggleDrop() {
     _dropOpen = !_dropOpen;
     var drop = document.getElementById('model-drop');
     var btn  = document.getElementById('model-btn');
+    // Teleport to body so body overflow:hidden never clips it
+    if (drop.parentElement !== document.body) {
+        document.body.appendChild(drop);
+    }
     if (_dropOpen) {
         var r = btn.getBoundingClientRect();
         drop.style.top    = (r.bottom + 6) + 'px';
         drop.style.left   = r.left + 'px';
         drop.style.display = 'block';
         btn.classList.add('open');
+        setTimeout(function() {
+            document.getElementById('model-search') && document.getElementById('model-search').focus();
+        }, 50);
     } else {
         drop.style.display = 'none';
         btn.classList.remove('open');
@@ -800,7 +808,7 @@ function pickModel(model, label) {
     document.getElementById('model-btn').classList.remove('open');
 }
 
-document.addEventListener('click', function(e) {
+document.addEventListener('mousedown', function(e) {
     if (_dropOpen && !e.target.closest('#model-btn') && !e.target.closest('#model-drop')) {
         _dropOpen = false;
         document.getElementById('model-drop').style.display = 'none';
@@ -874,7 +882,7 @@ function appendMsg(role, content) {
 
     const who = document.createElement('div');
     who.className = 'msg-who';
-    who.textContent = role === 'user' ? 'You' : 'Nexus';
+    who.textContent = role === 'user' ? 'You' : curLabel;
 
     const txt = document.createElement('div');
     txt.className = 'msg-text';
