@@ -7,6 +7,7 @@ attacks on AI infrastructure.
 For security research purposes only.
 """
 
+import asyncio
 import json
 import multiprocessing
 import os
@@ -26,7 +27,7 @@ from rich.panel import Panel
 load_dotenv()
 
 from models.db import Database
-from services import init_logger, get_geoip_service, get_logger
+from services import init_logger, get_geoip_service, get_logger, get_responder
 from services.config import get_config
 from routers import (
     chat_router,
@@ -55,6 +56,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./honeypot.db")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "80"))
 GEOIP_DB_PATH = os.getenv("GEOIP_DB_PATH", "./GeoLite2-City.mmdb")
+ADMIN_WS_FEED_ENABLED = os.getenv("ADMIN_WS_FEED_ENABLED", "").lower() in {"1", "true", "yes", "on"}
 
 # Database instance
 db: Database = None
@@ -331,6 +333,10 @@ async def ws_feed(websocket: WebSocket):
     Authenticated via the same JWT cookie used by the admin UI.
     Broadcasts: request_new, request_analysis, canary_hit, trap_hit.
     """
+    if not ADMIN_WS_FEED_ENABLED:
+        await websocket.close(code=1008)
+        return
+
     from routers.admin import verify_token
     from services.ws_feed import get_ws_manager
 
@@ -384,7 +390,7 @@ async def ui_api_chat(request: Request):
     All conversations are logged for threat intelligence.
     """
     from fastapi.responses import StreamingResponse
-    from services.groq_chat import get_groq_chat
+    from services.groq_chat import HONEYPOT_SYSTEM_PROMPT, get_groq_chat
 
     body_raw = (await request.body()).decode("utf-8", errors="replace")
     try:
@@ -406,8 +412,28 @@ async def ui_api_chat(request: Request):
     )
 
     groq_chat = get_groq_chat()
+    responder = get_responder()
+
+    async def ui_stream():
+        # Prefer the configured LLM backend for public chat.
+        content = await groq_chat.complete(
+            messages,
+            system_prompt=HONEYPOT_SYSTEM_PROMPT,
+            max_tokens=512,
+        )
+        if not content:
+            # Keep the splash page usable even when Groq is rate-limited.
+            content = responder._select_response(messages)
+
+        words = content.split()
+        for idx, word in enumerate(words):
+            suffix = " " if idx < len(words) - 1 else ""
+            yield f'data: {json.dumps({"choices":[{"delta":{"content": word + suffix},"finish_reason": None}]})}\n\n'
+            await asyncio.sleep(0.03)
+        yield "data: [DONE]\n\n"
+
     return StreamingResponse(
-        groq_chat.stream(messages),
+        ui_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -500,7 +526,11 @@ def _get_listen_ports() -> list[int]:
     """Return the primary and configured additional listener ports."""
     config = get_config()
     ports = [PORT]
+    ssh_enabled = config.get("ssh_honeypot_enabled", False)
+    ssh_port = int(config.get("ssh_listen_port", 2222))
     for extra in config.get("additional_ports", []) or []:
+        if ssh_enabled and extra == ssh_port:
+            continue
         if extra not in ports:
             ports.append(extra)
     return ports
