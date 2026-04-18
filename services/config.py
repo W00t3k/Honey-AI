@@ -278,6 +278,11 @@ class ConfigService:
             port for port in (_parse_port(p) for p in (cfg.additional_ports or []))
             if port is not None
         })
+        if cfg.ssh_honeypot_enabled:
+            cfg.additional_ports = [
+                port for port in cfg.additional_ports
+                if port != cfg.ssh_listen_port
+            ]
 
         cfg.canary_tokens = _normalize_canary_tokens(cfg.canary_tokens)
 
