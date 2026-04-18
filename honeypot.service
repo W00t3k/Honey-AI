@@ -5,12 +5,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=honeypot
-Group=honeypot
-WorkingDirectory=/opt/honeypot
-Environment="PATH=/opt/honeypot/venv/bin"
-EnvironmentFile=/opt/honeypot/.env
-ExecStart=/opt/honeypot/venv/bin/python main.py
+User=root
+Group=root
+WorkingDirectory=/root/Honey-AI
+Environment="PATH=/root/Honey-AI/venv/bin:/usr/bin:/bin"
+EnvironmentFile=-/root/Honey-AI/.env
+ExecStart=/root/Honey-AI/venv/bin/python /root/Honey-AI/main.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
@@ -19,8 +19,8 @@ RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/opt/honeypot
+ProtectHome=no
+ReadWritePaths=/root/Honey-AI
 
 # Resource limits
 LimitNOFILE=65535

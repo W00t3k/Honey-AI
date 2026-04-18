@@ -16,6 +16,7 @@ cd "$SCRIPT_DIR"
 
 PID_FILE="honeypot.pid"
 LOG_FILE="honeypot.log"
+SYSTEMD_UNIT="honeypot"
 
 # ── ANSI colours ─────────────────────────────────────────────────────────────
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
@@ -35,6 +36,29 @@ die()  { echo -e "${RED}ERROR: $*${NC}" >&2; exit 1; }
 info() { echo -e "${CYAN}$*${NC}"; }
 ok()   { echo -e "${GREEN}✓ $*${NC}"; }
 warn() { echo -e "${YELLOW}⚠  $*${NC}"; }
+
+systemd_usable() {
+  command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files >/dev/null 2>&1
+}
+
+systemd_unit_installed() {
+  systemctl cat "$SYSTEMD_UNIT" >/dev/null 2>&1
+}
+
+ensure_systemd_unit() {
+  local unit_src="$SCRIPT_DIR/${SYSTEMD_UNIT}.service"
+  local unit_dst="/etc/systemd/system/${SYSTEMD_UNIT}.service"
+
+  [ -f "$unit_src" ] || die "Missing service file: $unit_src"
+  [ -w /etc/systemd/system ] || die "Need write access to /etc/systemd/system to install ${SYSTEMD_UNIT}.service"
+
+  if [ ! -f "$unit_dst" ] || ! cmp -s "$unit_src" "$unit_dst"; then
+    cp "$unit_src" "$unit_dst"
+    systemctl daemon-reload
+  fi
+
+  systemctl enable "$SYSTEMD_UNIT" >/dev/null 2>&1 || true
+}
 
 check_python() {
   if ! command -v python3 &>/dev/null; then
@@ -109,6 +133,10 @@ pid_running() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
+find_main_pid() {
+  pgrep -fo "python main\\.py" 2>/dev/null || true
+}
+
 kill_stale() {
   # 1. Kill by process name (main.py / uvicorn)
   local pids
@@ -155,6 +183,26 @@ except Exception:
 
 # ── sub-commands ──────────────────────────────────────────────────────────────
 cmd_status() {
+  if systemd_usable && systemd_unit_installed; then
+    if systemctl is-active --quiet "$SYSTEMD_UNIT"; then
+      ok "Honeypot service is running"
+      info "  Status : systemctl status ${SYSTEMD_UNIT} --no-pager"
+      info "  Logs   : journalctl -u ${SYSTEMD_UNIT} -f"
+      info "  Stop   : $0 --stop"
+    else
+      warn "Honeypot service is NOT running"
+    fi
+    exit 0
+  fi
+
+  if ! pid_running; then
+    local live_pid
+    live_pid=$(find_main_pid)
+    if [ -n "$live_pid" ]; then
+      echo "$live_pid" > "$PID_FILE"
+    fi
+  fi
+
   if pid_running; then
     PID=$(cat "$PID_FILE")
     ok "Honeypot is running  (PID $PID)"
@@ -168,12 +216,22 @@ cmd_status() {
 }
 
 cmd_stop() {
+  if systemd_usable && systemd_unit_installed; then
+    systemctl stop "$SYSTEMD_UNIT"
+    ok "Honeypot service stopped"
+    exit 0
+  fi
+
   kill_stale
   ok "Honeypot stopped"
   exit 0
 }
 
 cmd_logs() {
+  if systemd_usable && systemd_unit_installed; then
+    exec journalctl -u "$SYSTEMD_UNIT" -f
+  fi
+
   if [ ! -f "$LOG_FILE" ]; then
     die "No log file found at $LOG_FILE — is the honeypot running in background mode?"
   fi
@@ -181,10 +239,33 @@ cmd_logs() {
 }
 
 cmd_bg() {
+  if systemd_usable; then
+    ensure_systemd_unit
+    systemctl restart "$SYSTEMD_UNIT"
+    sleep 2
+    if systemctl is-active --quiet "$SYSTEMD_UNIT"; then
+      ok "Honeypot started with systemd  (unit ${SYSTEMD_UNIT}.service)"
+      info "  Logs : journalctl -u ${SYSTEMD_UNIT} -f"
+      info "  Stop : $0 --stop"
+      exit 0
+    fi
+    systemctl status "$SYSTEMD_UNIT" --no-pager || true
+    die "systemd failed to keep ${SYSTEMD_UNIT}.service running"
+  fi
+
   kill_stale
-  nohup python main.py > "$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
-  sleep 1
+  : > "$LOG_FILE"
+  if command -v setsid >/dev/null 2>&1; then
+    nohup setsid python -u main.py < /dev/null > "$LOG_FILE" 2>&1 &
+  else
+    nohup python -u main.py < /dev/null > "$LOG_FILE" 2>&1 &
+  fi
+  sleep 2
+  local live_pid
+  live_pid=$(find_main_pid)
+  if [ -n "$live_pid" ]; then
+    echo "$live_pid" > "$PID_FILE"
+  fi
   if pid_running; then
     ok "Honeypot started in background  (PID $(cat $PID_FILE))"
     info "  Logs : tail -f $SCRIPT_DIR/$LOG_FILE"
