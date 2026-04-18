@@ -152,14 +152,17 @@ kill_stale() {
   if [ -f "config.json" ]; then
     # Extract all port numbers from config (additional_ports + "port" key)
     local cfg_ports
-    cfg_ports=$(python3 -c "
+    cfg_ports=$(PORT="$PORT" python3 -c "
 import json, os
 try:
     cfg = json.load(open('config.json'))
     pts = set()
-    pts.add(int(cfg.get('port', os.getenv('PORT', 80))))
+    # Use the PORT already resolved by start.sh, not the 80 fallback
+    pts.add(int(os.getenv('PORT', 8080)))
     for p in cfg.get('additional_ports', []):
         pts.add(int(p))
+    # Never kill nginx's ports
+    pts -= {80, 443}
     print(' '.join(str(p) for p in pts))
 except Exception:
     pass
