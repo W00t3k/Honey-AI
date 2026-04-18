@@ -571,17 +571,18 @@ def _run_multiport_servers():
     ports = _get_listen_ports()
 
     # Pre-check every port; skip ones that are already in use.
-    primary_port = ports[0]
+    # Primary port failure is logged as CRITICAL but we still attempt — uvicorn
+    # will fail loudly if it can't bind, and systemd will restart. Exiting here
+    # on primary failure causes restart-loop when a dying child still holds the port.
     bindable = []
     for port in ports:
         err = _probe_port(port)
         if err:
-            level = "CRITICAL" if port == primary_port else "WARNING"
+            level = "CRITICAL" if port == ports[0] else "WARNING"
             console.print(f"[{'red' if level == 'CRITICAL' else 'yellow'}]{level}: port {port} not bindable — {err}[/{'red' if level == 'CRITICAL' else 'yellow'}]")
-            if port == primary_port:
-                sys.exit(1)
-        else:
-            bindable.append(port)
+            if port != ports[0]:
+                continue  # skip non-primary ports that aren't available
+        bindable.append(port)
 
     ports = bindable
 
