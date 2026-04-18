@@ -82,6 +82,17 @@ class HoneypotConfig:
     response_delay_min_ms: int = 80
     response_delay_max_ms: int = 300
 
+    # Ollama local LLM backend
+    ollama_enabled: bool = False
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:1.5b"
+
+    # Custom OpenAI-compatible backend
+    custom_llm_enabled: bool = False
+    custom_llm_base_url: str = ""
+    custom_llm_api_key: str = ""
+    custom_llm_model: str = ""
+
     # SSH honeypot
     ssh_honeypot_enabled: bool = False
     ssh_listen_host: str = "0.0.0.0"
