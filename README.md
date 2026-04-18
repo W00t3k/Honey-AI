@@ -115,6 +115,42 @@ Validator enforces:
 
 On startup, the SHA-256 of `config/injection_payloads.yaml` is logged to the console so you can correlate which payload version caught which agent during an ablation window.
 
+## SSH honeypot (port 2222)
+
+`services/ssh_honeypot.py` runs an asyncssh-based interactive shell alongside the HTTP honeypot. Every password, public key, keystroke, and command is logged. The shell uses a HoneyGPT-style Chain-of-Thought prompt when an LLM backend is available so responses stay coherent across sessions.
+
+- Protocol label: `ssh` — query with `SELECT * FROM requests WHERE protocol='ssh'`
+- Canned outputs for `whoami`, `ls`, `cat ~/.bashrc`, `env`, `history`, `ps`, `id`, `uname -a`
+- Credentials + pubkey fingerprints captured on every auth attempt (accept-all policy)
+- Planted canary in shell history and `~/.bashrc` ties SSH sessions back to the HTTP canary tracker
+- Config knobs: `ssh_honeypot_enabled`, `ssh_listen_host`, `ssh_listen_port`, `ssh_host_key_path`
+
+Attracting SSH traffic:
+
+- Expose port 22 via iptables DNAT → 2222 (Shodan/masscan find it fast)
+- Seed the `/v1/organization/users` response with SSH usernames matching the honeypot shell
+- Leak a private key fragment in an MCP resource canary that keys to this shell
+
+## AI-specific lure files (`routers/lures.py`)
+
+Paths an LLM coding agent scrapes before acting — each embeds canary tokens:
+
+| Path | What it impersonates |
+|------|----------------------|
+| `/.cursorrules` / `/.windsurfrules` | IDE agent project rules |
+| `/CLAUDE.md` | Claude Code project instructions |
+| `/.claude/settings.json` | Claude Code settings + MCP config |
+| `/.github/workflows/deploy.yml` | CI pipeline with inline secrets |
+| `/docker-compose.yml`, `/Makefile` | Ops surface with env vars |
+| `/internal/system-prompt.txt` | Fake internal prompt with jailbreak bait |
+| `/internal/training-data.jsonl` | Synthetic fine-tune data |
+| `/internal/slack-dump.json` | Fake Slack export with "shared" keys |
+| `/openapi.json`, `/llms.txt` | Agent-discoverable API contract |
+| `/.well-known/ai-plugin.json` | ChatGPT plugin manifest |
+| `/model-card.json` | HF model card with canary embedded |
+
+An agent that fetches any of these, then uses an embedded token elsewhere, trips the canary reuse alarm.
+
 ## LLM backend + Ollama auto-fallback
 
 The honeypot ships a unified LLM backend (`services/llm_backend.py`) that tries backends in priority order: `ollama → custom_llm → groq` by default. A resilient wrapper (`resilient_complete` / `resilient_stream`) falls back automatically on failure, marks unhealthy backends for 30s, and records which backend actually served each call in the `llm_backend_used` column.
@@ -318,22 +354,21 @@ Then enable in admin UI → Settings → LLM Backends, or set `ollama_enabled: t
 
 ## Production deployment (Ubuntu 24.04)
 
+The honeypot binds **port 80 directly** for one vhost; nginx fronts it to add TLS (certbot) and to proxy the public domain. All other listed ports bind from the app via multi-process uvicorn.
+
 ```bash
 sudo apt update && sudo apt install -y python3.12 python3.12-venv nginx certbot python3-certbot-nginx
-sudo useradd -r -s /bin/false honeypot
-sudo mkdir -p /opt/honeypot
-sudo chown honeypot:honeypot /opt/honeypot
-scp -r honeypot/* user@server:/opt/honeypot/
-cd /opt/honeypot && sudo -u honeypot ./setup.sh
 sudo cp honeypot.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now honeypot
 sudo cp nginx.conf /etc/nginx/sites-available/honeypot
-# Edit nginx.conf — set your domain
+# Edit server_name in nginx.conf; upstream is 127.0.0.1:8080 (matches PORT in .env)
 sudo ln -s /etc/nginx/sites-available/honeypot /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d api.yourdomain.com
-sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
+sudo ufw allow 80,443,2222/tcp && sudo ufw enable
 ```
+
+Ports bound by the app (via `additional_ports` in config.json): `2379, 3000, 3001, 5000, 6333, 6334, 8080, 8443, 8888, 9000, 9001, 9200, 11434` — etcd, web frameworks, Qdrant, OpenAI-compat proxies, Elastic, Ollama. Each advertises a realistic banner so Censys/Shodan tag them correctly.
 
 ---
 
