@@ -32,7 +32,7 @@ console = Console()
 Base = declarative_base()
 
 # Schema version - increment when adding new columns
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # New columns added in each version (for migration)
 SCHEMA_MIGRATIONS = {
@@ -288,6 +288,7 @@ class Database:
             database_url,
             echo=False,
             pool_pre_ping=True,
+            connect_args={"timeout": 30} if "sqlite" in database_url else {},
         )
         self.async_session = async_sessionmaker(
             self.engine,
@@ -298,6 +299,13 @@ class Database:
     async def init_db(self):
         """Create all tables and run migrations."""
         async with self.engine.begin() as conn:
+            # Enable WAL mode and tune SQLite for multi-process writes.
+            if "sqlite" in str(self.engine.url):
+                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                await conn.execute(text("PRAGMA synchronous=NORMAL"))
+                await conn.execute(text("PRAGMA busy_timeout=5000"))
+                await conn.execute(text("PRAGMA cache_size=-8000"))
+
             # Create tables if they don't exist
             await conn.run_sync(Base.metadata.create_all)
 
@@ -346,13 +354,21 @@ class Database:
         return self.async_session()
 
     async def log_request(self, request_data: dict) -> Request:
-        """Log a request to the database."""
-        async with self.async_session() as session:
-            request = Request(**request_data)
-            session.add(request)
-            await session.commit()
-            await session.refresh(request)
-            return request
+        """Log a request to the database, retrying on transient SQLite locks."""
+        import asyncio as _asyncio
+        for attempt in range(5):
+            try:
+                async with self.async_session() as session:
+                    request = Request(**request_data)
+                    session.add(request)
+                    await session.commit()
+                    await session.refresh(request)
+                    return request
+            except Exception as e:
+                if attempt < 4 and ("locked" in str(e).lower() or "busy" in str(e).lower()):
+                    await _asyncio.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
 
     async def get_recent_requests(self, limit: int = 100) -> list[Request]:
         """Get most recent requests."""
@@ -521,6 +537,7 @@ class Database:
         ai_iocs: list,
         ai_confidence: float,
         ai_actor_type: str = "unknown",
+        llm_backend_used: str = "",
     ):
         """Update a request with AI analysis results."""
         async with self.async_session() as session:
@@ -538,6 +555,8 @@ class Database:
                 request.ai_confidence = ai_confidence
                 request.ai_actor_type = ai_actor_type
                 request.ai_analyzed_at = datetime.utcnow()
+                if llm_backend_used:
+                    request.llm_backend_used = llm_backend_used
                 await session.commit()
 
     async def get_request(self, request_id: int) -> Optional[Request]:
@@ -778,6 +797,119 @@ class Database:
             )
             return [r.to_dict() for r in result.scalars().all()]
 
+    async def register_canary_key(self, key: str, label: str = "") -> None:
+        """Persist an issued canary key so all workers can check it."""
+        try:
+            async with self.async_session() as session:
+                exists = await session.execute(
+                    select(CanaryKey).where(CanaryKey.key == key)
+                )
+                if exists.scalar_one_or_none() is None:
+                    session.add(CanaryKey(key=key, label=label))
+                    await session.commit()
+        except Exception:
+            pass
+
+    async def is_canary_key(self, key: str) -> bool:
+        """Return True if this key was previously issued as a canary."""
+        try:
+            async with self.async_session() as session:
+                result = await session.execute(
+                    select(CanaryKey).where(CanaryKey.key == key)
+                )
+                return result.scalar_one_or_none() is not None
+        except Exception:
+            return False
+
+    async def get_all_canary_keys(self) -> set[str]:
+        """Return the full set of issued canary keys."""
+        try:
+            async with self.async_session() as session:
+                result = await session.execute(select(CanaryKey.key))
+                return {row[0] for row in result.all()}
+        except Exception:
+            return set()
+
+    async def log_ssh_event(
+        self,
+        *,
+        session_id: str,
+        source_ip: str,
+        source_port: Optional[int] = None,
+        client_version: str = "",
+        username: str = "",
+        password: str = "",
+        seq: int = 0,
+        command: str = "",
+        output: str = "",
+    ) -> None:
+        """Append one command/output pair to the SSH session transcript."""
+        try:
+            async with self.async_session() as session:
+                session.add(SshSession(
+                    session_id=session_id,
+                    source_ip=source_ip,
+                    source_port=source_port,
+                    client_version=client_version or "",
+                    username=username or "",
+                    password=password or "",
+                    seq=seq,
+                    command=command,
+                    output=output[:8000] if output else "",
+                ))
+                await session.commit()
+        except Exception:
+            pass
+
+    async def get_ssh_session(self, session_id: str) -> list[dict]:
+        """Return ordered transcript for a session."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(SshSession)
+                .where(SshSession.session_id == session_id)
+                .order_by(SshSession.seq.asc())
+            )
+            rows = result.scalars().all()
+            return [
+                {
+                    "seq": r.seq,
+                    "ts": r.ts.isoformat() if r.ts else None,
+                    "command": r.command,
+                    "output": r.output,
+                }
+                for r in rows
+            ]
+
+    async def get_ssh_sessions(self, limit: int = 50) -> list[dict]:
+        """Return recent SSH sessions (one row per session with metadata)."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(
+                    SshSession.session_id,
+                    SshSession.source_ip,
+                    SshSession.client_version,
+                    SshSession.username,
+                    func.count(SshSession.id).label("commands"),
+                    func.min(SshSession.ts).label("started"),
+                    func.max(SshSession.ts).label("last_seen"),
+                )
+                .group_by(SshSession.session_id)
+                .order_by(func.max(SshSession.ts).desc())
+                .limit(limit)
+            )
+            return [
+                {
+                    "session_id": r[0],
+                    "source_ip": r[1],
+                    "client_version": r[2],
+                    "username": r[3],
+                    "commands": r[4],
+                    "started": r[5].isoformat() if r[5] else None,
+                    "last_seen": r[6].isoformat() if r[6] else None,
+                }
+                for r in result.all()
+            ]
+
 
 class InjectionSession(Base):
     """
@@ -805,6 +937,52 @@ class InjectionSession(Base):
 
     __table_args__ = (
         Index('idx_injsess_ip', 'source_ip'),
+    )
+
+
+class SshSession(Base):
+    """
+    Full per-session SSH transcript for PTY replay.
+
+    One row per command. Group by session_id to replay a session in order.
+    """
+
+    __tablename__ = "ssh_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    source_ip = Column(String(45), nullable=False, index=True)
+    source_port = Column(Integer, nullable=True)
+    client_version = Column(String(200), nullable=True)
+    username = Column(String(200), nullable=True)
+    password = Column(String(500), nullable=True)
+    seq = Column(Integer, nullable=False, default=0)
+    ts = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    command = Column(Text, nullable=True)
+    output = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index('idx_ssh_session_id_seq', 'session_id', 'seq'),
+    )
+
+
+class CanaryKey(Base):
+    """
+    Cross-worker canary key registry.
+
+    Replaces the in-process `issued_canary_keys` set in ResponseGenerator so
+    all uvicorn workers share the same source of truth via SQLite WAL reads.
+    """
+
+    __tablename__ = "canary_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(256), nullable=False, unique=True, index=True)
+    label = Column(String(200), nullable=True)
+    issued_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('idx_canary_key', 'key'),
     )
 
 

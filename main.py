@@ -555,8 +555,36 @@ def _run_single_server(port: int, ssh_owner: bool = False):
     )
 
 
+def _probe_port(port: int) -> str | None:
+    """Return None if port is bindable, or an error string if not."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("0.0.0.0", port))
+        return None
+    except OSError as e:
+        return str(e)
+
+
 def _run_multiport_servers():
     ports = _get_listen_ports()
+
+    # Pre-check every port; skip ones that are already in use.
+    primary_port = ports[0]
+    bindable = []
+    for port in ports:
+        err = _probe_port(port)
+        if err:
+            level = "CRITICAL" if port == primary_port else "WARNING"
+            console.print(f"[{'red' if level == 'CRITICAL' else 'yellow'}]{level}: port {port} not bindable — {err}[/{'red' if level == 'CRITICAL' else 'yellow'}]")
+            if port == primary_port:
+                sys.exit(1)
+        else:
+            bindable.append(port)
+
+    ports = bindable
+
     if len(ports) == 1:
         _run_single_server(ports[0], ssh_owner=True)
         return

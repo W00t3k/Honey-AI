@@ -1028,3 +1028,91 @@ async def analyze_request_now(request: Request, request_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Attacker objects ───────────────────────────────────────────────────────────
+
+@router.get("/api/attackers")
+async def get_attackers(request: Request, limit: int = 100, days: int = 30):
+    """
+    Attacker-object view: one record per source_ip aggregating all signals.
+
+    Combines HTTP requests, SSH sessions, canary reuse, decoy hits, and
+    tradecraft extraction into a single object per IP.
+    """
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401)
+
+    from sqlalchemy import select, func, or_, Integer as SAInteger
+    from models.db import Request as Req, SshSession
+
+    db = get_database()
+    since = datetime.utcnow() - timedelta(days=days)
+
+    async with db.async_session() as session:
+        # Per-IP aggregation of HTTP signals
+        http_q = await session.execute(
+            select(
+                Req.source_ip,
+                Req.country_name,
+                Req.country_code,
+                Req.asn_org,
+                func.count(Req.id).label("total_requests"),
+                func.count(func.distinct(Req.protocol)).label("protocols"),
+                func.max(Req.timestamp).label("last_seen"),
+                func.min(Req.timestamp).label("first_seen"),
+                func.max(Req.classification).label("classification"),
+                func.max(Req.threat_level).label("threat_level"),
+                func.sum(func.cast(Req.is_flagged, SAInteger)).label("canary_hits"),
+                func.sum(func.cast(Req.trap_hit, SAInteger)).label("decoy_hits"),
+                func.max(Req.tradecraft_tool).label("tradecraft_tool"),
+                func.max(Req.tradecraft_goal).label("tradecraft_goal"),
+                func.max(Req.tradecraft_infra).label("tradecraft_infra"),
+                func.max(Req.agent_type).label("agent_type"),
+            )
+            .where(Req.timestamp >= since)
+            .group_by(Req.source_ip)
+            .order_by(func.count(Req.id).desc())
+            .limit(limit)
+        )
+        rows = http_q.all()
+
+        # SSH session counts per IP
+        ssh_q = await session.execute(
+            select(
+                SshSession.source_ip,
+                func.count(func.distinct(SshSession.session_id)).label("ssh_sessions"),
+                func.count(SshSession.id).label("ssh_commands"),
+            )
+            .where(SshSession.ts >= since)
+            .group_by(SshSession.source_ip)
+        )
+        ssh_by_ip = {r[0]: {"ssh_sessions": r[1], "ssh_commands": r[2]} for r in ssh_q.all()}
+
+    attackers = []
+    for r in rows:
+        ip = r[0]
+        ssh = ssh_by_ip.get(ip, {})
+        attackers.append({
+            "source_ip": ip,
+            "country": r[1],
+            "country_code": r[2],
+            "asn_org": r[3],
+            "total_requests": r[4],
+            "protocols_seen": r[5],
+            "last_seen": r[6].isoformat() if r[6] else None,
+            "first_seen": r[7].isoformat() if r[7] else None,
+            "classification": r[8],
+            "threat_level": r[9],
+            "canary_hits": int(r[10] or 0),
+            "decoy_hits": int(r[11] or 0),
+            "tradecraft_tool": r[12],
+            "tradecraft_goal": r[13],
+            "tradecraft_infra": r[14],
+            "agent_type": r[15],
+            "ssh_sessions": ssh.get("ssh_sessions", 0),
+            "ssh_commands": ssh.get("ssh_commands", 0),
+        })
+
+    return {"attackers": attackers, "count": len(attackers), "days": days}

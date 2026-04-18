@@ -425,6 +425,12 @@ class RequestLogger:
             canary_label = None
             is_canary = api_key in responder.issued_canary_keys
 
+            # Cross-worker check: key may have been issued by a different process
+            if not is_canary:
+                is_canary = await self.db.is_canary_key(api_key)
+                if is_canary:
+                    canary_label = "cross-worker canary"
+
             # Check operator-defined tokens
             if not is_canary:
                 for ct in config.get("canary_tokens", []):
@@ -564,7 +570,7 @@ class RequestLogger:
 
             analysis = await analyzer.analyze(request_data)
             if analysis:
-                # Update database with analysis
+                from services.llm_backend import get_last_backend_used
                 await self.db.update_analysis(
                     request_id=request_id,
                     threat_level=analysis.threat_level,
@@ -575,6 +581,7 @@ class RequestLogger:
                     ai_iocs=analysis.iocs,
                     ai_confidence=analysis.confidence,
                     ai_actor_type=getattr(analysis, "actor_type", "unknown"),
+                    llm_backend_used=get_last_backend_used(),
                 )
 
                 # Broadcast analysis update to live dashboard clients

@@ -756,10 +756,20 @@ class ResponseGenerator:
         random.shuffle(keys)
         return {"object": "list", "data": keys}
 
-    def _issue_canary_key(self) -> str:
-        """Generate a canary API key and record it for later detection."""
+    def _issue_canary_key(self, label: str = "") -> str:
+        """Generate a canary API key and register it locally + in DB."""
         key = generate_fake_api_key()
         self.issued_canary_keys.add(key)
+        # Persist cross-worker via DB (fire-and-forget).
+        try:
+            import asyncio as _asyncio
+            from services.logger import get_logger
+            db = get_logger().db
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                _asyncio.ensure_future(db.register_canary_key(key, label))
+        except Exception:
+            pass
         return key
 
     def assistants_list(self) -> dict:

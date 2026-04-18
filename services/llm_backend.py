@@ -30,6 +30,10 @@ _LAST_BACKEND_USED: str = "none"
 _HEALTHCHECK_TTL = 30.0  # seconds — re-probe at most this often
 
 
+class _RateLimited(Exception):
+    """Internal: raised by a backend on 429 to trip breaker immediately."""
+
+
 # ── Backend registry ───────────────────────────────────────────────────────────
 
 class LLMBackend:
@@ -96,7 +100,12 @@ class GroqBackend(LLMBackend):
             if r.status_code == 200:
                 choices = r.json().get("choices", [])
                 return (choices[0].get("message", {}).get("content") or "").strip()
+            if r.status_code == 429:
+                console.print("[yellow]Groq 429 — rate limited, switching to fallback backend[/yellow]")
+                raise _RateLimited("groq 429")
             console.print(f"[red]Groq error {r.status_code}[/red]")
+        except _RateLimited:
+            raise
         except Exception as e:
             console.print(f"[red]Groq complete error: {e}[/red]")
         return ""
@@ -358,14 +367,14 @@ def get_last_backend_used() -> str:
     return _LAST_BACKEND_USED
 
 
-def _mark_health(name: str, ok: bool) -> None:
+def _mark_health(name: str, ok: bool, immediate: bool = False) -> None:
     state = _BACKEND_HEALTH.setdefault(name, {"failures": 0, "last_probe": 0.0, "healthy": True})
     if ok:
         state["failures"] = 0
         state["healthy"] = True
     else:
         state["failures"] += 1
-        if state["failures"] >= 2:
+        if immediate or state["failures"] >= 2:
             state["healthy"] = False
     state["last_probe"] = time.time()
 
@@ -451,6 +460,10 @@ async def resilient_complete(
                 _LAST_BACKEND_USED = name
                 return out
             _mark_health(name, False)
+        except _RateLimited:
+            _mark_health(name, False, immediate=True)
+            console.print(f"[yellow]resilient_complete: {name} rate-limited, trying next backend[/yellow]")
+            continue
         except Exception as e:
             console.print(f"[dim]resilient_complete[{name}] failed: {e}[/dim]")
             _mark_health(name, False)

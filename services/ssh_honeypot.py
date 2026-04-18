@@ -113,7 +113,7 @@ class SSHHoneypotService:
 
 === SESSION STATE ===
 Working directory: {state.cwd}
-User: appsvc
+User: root
 Hostname: ip-10-24-7-18
 Files created this session: {', '.join(sorted(state.created)) or 'none'}
 Env: PATH={state.env.get('PATH', '')}
@@ -166,13 +166,13 @@ If the command would reveal secrets, embed a realistic-looking value.
         if not parts or parts[0] != "cd":
             return None
 
-        target = parts[1] if len(parts) > 1 else "/home/appsvc"
+        target = parts[1] if len(parts) > 1 else "/root"
 
         # Resolve path
-        if target == "~" or target == "$HOME":
-            new_cwd = "/home/appsvc"
+        if target in ("~", "$HOME"):
+            new_cwd = "/root"
         elif target == "-":
-            new_cwd = "/home/appsvc"  # simplified
+            new_cwd = state.cwd  # simplified: no OLDPWD tracking
         elif target.startswith("/"):
             new_cwd = target
         else:
@@ -326,35 +326,78 @@ If the command would reveal secrets, embed a realistic-looking value.
     def _canned_output(self, command: str, state=None) -> Optional[str]:
         """Handle common shell commands without calling the LLM."""
         if command in {"whoami", "id -un"}:
-            return "appsvc"
+            return "root"
+        if command in {"id", "id -a"}:
+            return "uid=0(root) gid=0(root) groups=0(root)"
         if command == "pwd":
-            return (state.cwd if state else "/home/appsvc")
+            return (state.cwd if state else "/root")
         if command.startswith("hostname"):
             return "ip-10-24-7-18"
         if command.startswith("uname"):
             return "Linux ip-10-24-7-18 6.8.0-31-generic #31-Ubuntu SMP x86_64 GNU/Linux"
-        if command in {"ls", "ls -la", "ls -lah"}:
+        if command in {"history", "history 20"}:
+            from services.responder import get_responder
+            tok = get_responder().get_canary_token(2)
             return (
-                "total 56\n"
-                "drwxr-x--- 6 appsvc appsvc 4096 Apr 13 07:12 .\n"
-                "drwxr-xr-x 3 root   root   4096 Apr 11 10:03 ..\n"
-                "-rw------- 1 appsvc appsvc  692 Apr 13 06:55 .bash_history\n"
-                "-rw-r--r-- 1 appsvc appsvc  220 Apr 11 10:03 .bash_logout\n"
-                "-rw-r--r-- 1 appsvc appsvc 4077 Apr 13 07:12 .bashrc\n"
-                "-rw-r--r-- 1 appsvc appsvc  807 Apr 11 10:03 .profile\n"
-                "drwxrwxr-x 3 appsvc appsvc 4096 Apr 12 18:44 api\n"
-                "drwxrwxr-x 2 appsvc appsvc 4096 Apr 12 19:10 config\n"
-                "drwxrwxr-x 4 appsvc appsvc 4096 Apr 12 17:51 venv"
+                "    1  ssh appsvc@10.24.7.18\n"
+                "    2  sudo su -\n"
+                f"    3  export OPENAI_API_KEY={tok}\n"
+                "    4  python3 /home/appsvc/api/ops.py --test-connection\n"
+                "    5  curl -H 'Authorization: Bearer $OPENAI_API_KEY' https://api.openai.com/v1/models\n"
+                "    6  systemctl restart appsvc\n"
+                "    7  tail -f /var/log/appsvc/error.log\n"
+                "    8  cat /root/.env\n"
+                "    9  vi /root/.env\n"
+                "   10  exit\n"
             )
-        if command.startswith("cat ~/.bashrc"):
-            canary = get_logger()  # ensure logger initialized before responder access
-            _ = canary
+        if command in {"ps", "ps aux", "ps -ef", "ps -aux"}:
+            return (
+                "USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\n"
+                "root           1  0.0  0.1 168348 11524 ?        Ss   07:10   0:01 /sbin/init\n"
+                "root         512  0.0  0.0  15420  1804 ?        Ss   07:10   0:00 sshd: /usr/sbin/sshd -D\n"
+                "appsvc      1024  0.4  2.1 312448 86452 ?        Sl   07:12   0:18 python3 /home/appsvc/api/main.py\n"
+                "root        2048  0.0  0.0  20396  3872 pts/0    Ss   07:45   0:00 -bash\n"
+                "root        2071  0.0  0.0  21920  2736 pts/0    R+   07:45   0:00 ps aux\n"
+            )
+        if command in {"ls", "ls -la", "ls -lah", "ls -al"}:
+            cwd = state.cwd if state else "/root"
+            if cwd == "/root" or cwd == "~":
+                return (
+                    "total 44\n"
+                    "drwx------  4 root root 4096 Apr 13 07:14 .\n"
+                    "drwxr-xr-x 19 root root 4096 Apr 11 10:00 ..\n"
+                    "-rw-------  1 root root 1847 Apr 13 07:22 .bash_history\n"
+                    "-rw-r--r--  1 root root  571 Apr 11 10:00 .bashrc\n"
+                    "drwxr-xr-x  2 root root 4096 Apr 11 10:03 .config\n"
+                    "-rw-------  1 root root  248 Apr 13 06:58 .env\n"
+                    "-rw-r--r--  1 root root  161 Apr 11 10:00 .profile\n"
+                    "drwx------  2 root root 4096 Apr 12 18:33 .ssh\n"
+                )
+            if cwd == "/home/appsvc":
+                return (
+                    "total 56\n"
+                    "drwxr-x--- 6 appsvc appsvc 4096 Apr 13 07:12 .\n"
+                    "drwxr-xr-x 3 root   root   4096 Apr 11 10:03 ..\n"
+                    "-rw------- 1 appsvc appsvc  692 Apr 13 06:55 .bash_history\n"
+                    "-rw-r--r-- 1 appsvc appsvc  220 Apr 11 10:03 .bash_logout\n"
+                    "-rw-r--r-- 1 appsvc appsvc 4077 Apr 13 07:12 .bashrc\n"
+                    "-rw-r--r-- 1 appsvc appsvc  807 Apr 11 10:03 .profile\n"
+                    "drwxrwxr-x 3 appsvc appsvc 4096 Apr 12 18:44 api\n"
+                    "drwxrwxr-x 2 appsvc appsvc 4096 Apr 12 19:10 config\n"
+                    "drwxrwxr-x 4 appsvc appsvc 4096 Apr 12 17:51 venv"
+                )
+            # Generic fallback for other dirs
+            return "total 0"
+        if command in {"cat .bashrc", "cat ~/.bashrc", "cat /root/.bashrc"}:
             from services.responder import get_responder
             return (
-                "export PATH=$HOME/venv/bin:$PATH\n"
-                "export OPENAI_API_KEY="
-                f"{get_responder().get_canary_token(0)}\n"
-                "alias llmctl='python /home/appsvc/api/ops.py'\n"
+                "# ~/.bashrc: executed by bash(1) for non-login shells.\n"
+                "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+                f"export OPENAI_API_KEY={get_responder().get_canary_token(2)}\n"
+                "export ANTHROPIC_API_KEY=sk-ant-api03-REDACTED\n"
+                "export PS1='\\[\\e[01;31m\\]\\u@\\h\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]\\$ '\n"
+                "alias ll='ls -la'\n"
+                "alias cls='clear'\n"
             )
         if command.startswith("cat /etc/environment"):
             from services.responder import get_responder
@@ -410,17 +453,9 @@ If the command would reveal secrets, embed a realistic-looking value.
                 "-rw-r--r--  1 root root  161 Apr 11 10:00 .profile\n"
                 "drwx------  2 root root 4096 Apr 12 18:33 .ssh\n"
             )
-        if command in {"cat /root/.bashrc", "cat /root/.bashrc | grep -i key", "cat ~/.bashrc"}:
+        if command == "cat /root/.bashrc | grep -i key":
             from services.responder import get_responder
-            return (
-                "# ~/.bashrc: executed by bash(1) for non-login shells.\n"
-                "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
-                f"export OPENAI_API_KEY={get_responder().get_canary_token(2)}\n"
-                "export ANTHROPIC_API_KEY=sk-ant-api03-REDACTED\n"
-                "export PS1='\\[\\e[01;31m\\]\\u@\\h\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]\\$ '\n"
-                "alias ll='ls -la'\n"
-                "alias cls='clear'\n"
-            )
+            return f"export OPENAI_API_KEY={get_responder().get_canary_token(2)}"
         if command in {"cat /root/.env", "cat ~/.env"}:
             from services.responder import get_responder
             return (
@@ -479,38 +514,50 @@ If the command would reveal secrets, embed a realistic-looking value.
         return None
 
     def _fallback_output(self, command: str) -> str:
-        return f"bash: {command.split()[0]}: command executed"
+        cmd = command.split()[0] if command.split() else command
+        return f"bash: {cmd}: command not found"
 
 
 class _SSHServer(SSHServerBase):
     def __init__(self, service: SSHHoneypotService) -> None:
         self.service = service
         self._conn = None
+        self._username = ""
+        self._password = ""
 
     def connection_made(self, conn) -> None:
         self._conn = conn
 
     def begin_auth(self, username: str) -> bool:
+        self._username = username
         return True
 
     def password_auth_supported(self) -> bool:
         return True
 
     def validate_password(self, username: str, password: str) -> bool:
+        self._username = username
+        self._password = password
         return True
 
     def session_requested(self):
-        return _SSHSession(self.service, self._conn)
+        return _SSHSession(self.service, self._conn, self._username, self._password)
 
 
 class _SSHSession(SSHServerSessionBase):
-    def __init__(self, service: SSHHoneypotService, conn) -> None:
+    def __init__(self, service: SSHHoneypotService, conn, username: str = "", password: str = "") -> None:
         self.service = service
         self.conn = conn
         self._chan = None
         self._buffer = ""
         self._peer_ip = "unknown"
         self._peer_port: Optional[int] = None
+        self._username = username
+        self._password = password
+        self._session_id = hashlib.sha256(
+            f"{id(self)}{username}".encode()
+        ).hexdigest()[:32]
+        self._seq = 0
 
     def connection_made(self, chan) -> None:
         self._chan = chan
@@ -544,24 +591,46 @@ class _SSHSession(SSHServerSessionBase):
 
         output = await self.service.execute(self._peer_ip, command)
         get_session_store().record_shell_turn(self._peer_ip, command, output)
+        client_version = self.conn.get_extra_info("client_version") or "ssh"
+
         await self.service.log_command(
             source_ip=self._peer_ip,
             source_port=self._peer_port,
             command=command,
             output=output,
-            client_version=self.conn.get_extra_info("client_version") or "ssh",
+            client_version=client_version,
         )
+
+        # Append to session replay transcript
+        try:
+            from services.logger import get_logger
+            await get_logger().db.log_ssh_event(
+                session_id=self._session_id,
+                source_ip=self._peer_ip,
+                source_port=self._peer_port,
+                client_version=client_version,
+                username=self._username,
+                password=self._password,
+                seq=self._seq,
+                command=command,
+                output=output,
+            )
+            self._seq += 1
+        except Exception:
+            pass
 
         if output:
             normalized = output.replace("\n", "\r\n")
             self._chan.write(f"{normalized}\r\n")
-        self._chan.write("appsvc@ip-10-24-7-18:~$ ")
+        cwd = get_session_store().get_shell_state(self._peer_ip).cwd or "/root"
+        display_cwd = "~" if cwd == "/root" else cwd
+        self._chan.write(f"root@ip-10-24-7-18:{display_cwd}# ")
 
     def _write_banner(self) -> None:
         self._chan.write(
             "Ubuntu 24.04.1 LTS \\n \\l\r\n"
             "Last login: Sat Apr 13 07:09:11 2026 from 10.0.2.15\r\n"
-            "appsvc@ip-10-24-7-18:~$ "
+            "root@ip-10-24-7-18:~# "
         )
 
     def _split_line(self, data: str) -> tuple[str, str, str]:
